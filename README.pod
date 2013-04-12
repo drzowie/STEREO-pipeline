@@ -1,0 +1,20 @@
+=head1 NAME
+
+STEREO-pipeline -- post-processing for STEREO/SECCHI
+
+=head1 OVERVIEW
+
+This is a collection of routines that comprise a STEREO spacecraft post-processing pipeline,
+to model (and remove) background sources from the STEREO heliospheric imaging data.  It is 
+kept as a collection of AutoLoader files in part because that style of development has become
+the norm in the solar physics community due to the widespread adoption of SolarSoft
+(http://ssw.lmsal.com), and in part because some of the tools are general-purpose enough that
+hiding them in a module could be counterproductive.
+
+=head1 AUTHOR, COPYRIGHT, LICENSE
+
+Copyright (c) 2011-2013 Craig DeForest
+
+This file may be modified and/or distributed under either the 
+L<Gnu Public License (v2)|http://www.gnu.org/licenses/old-licenses/gpl-2.0.html>
+or the L<Perl Artistic license|http://dev.perl.org/licenses/artistic.html>
