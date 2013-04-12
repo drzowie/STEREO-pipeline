@@ -36,8 +36,11 @@ or the L<Perl Artistic license|http://dev.perl.org/licenses/artistic.html>.
 
 =head1 ACKNOWLEDGEMENTS
 
-The author thanks the STEREO teams at the U.K.'s Rutherford Appleton Labs and the U.S.'s 
-Naval Research Laboratory for making their data available; and the L<Perl Data Language|http://pdl.perl.org>
+The author thanks the L<STEREO mission|http://stereo.gsfc.nasa.gov/mission/mission.shtml>
+and the SECCHI teams at the U.K.'s 
+L<Rutherford Appleton Labs|http://www.stfc.ac.uk/RALSpace/Areas+of+expertise/The+Sun/Solar+TErrestrial+RElations+Observatory+(STEREO)/20121.aspx>
+and the U.S.'s L<Naval Research Laboratory|http://secchi.nrl.navy.mil> for making their data available; 
+and the L<Perl Data Language|http://pdl.perl.org>
 development team for their tireless work on improving the language. Several individuals contributed
 greatly to the scientific effort embodied in this work.  Of particular note are T. Howard, J. Tappin,
 and C. Eyles.
