@@ -11,10 +11,19 @@ the norm in the solar physics community due to the widespread adoption of SolarS
 (http://ssw.lmsal.com), and in part because some of the tools are general-purpose enough that
 hiding them in a module could be counterproductive.
 
-=head1 STRUCTURE
+The routines accept Level 1 (photometrically calibrated) data from the STEREO/SECCHI instruments
+and extract from them a background model that is then subtracted and discarded.  They produce
+Thomson-scattered images of the transient solar wind and transient features within it. Typical 
+background rejection is 10^3-10^4.  In the case of data from STEREO-A HI-2, this means that 
+output noise levels are within a factor of ~3 of the photon noise floor of the data.
 
-The routines generally manipulate I<batches>
+The routines generally manipulate I<batches> of data, because spatiotemporal differences between 
+the individual images are used to separate background from desired features.
 
+=head1 LIMITATIONS
+
+As of Winter 2013, the pipeline has been tested on HI-1A and HI-2A data.  It is likely to work
+on HI-1B data (and testing will proceed in Spring 2013) but 
 
 
 =head1 AUTHOR, COPYRIGHT, LICENSE
@@ -24,3 +33,15 @@ Copyright (c) 2011-2013 Craig DeForest
 This file may be modified and/or distributed under either the 
 L<Gnu Public License (v2)|http://www.gnu.org/licenses/old-licenses/gpl-2.0.html>
 or the L<Perl Artistic license|http://dev.perl.org/licenses/artistic.html>.
+
+=head1 ACKNOWLEDGEMENTS
+
+The author thanks the STEREO teams at the U.K.'s Rutherford Appleton Labs and the U.S.'s 
+Naval Research Laboratory for making their data available; and the L<Perl Data Language|http://pdl.perl.org>
+development team for their tireless work on improving the language. Several individuals contributed
+greatly to the scientific effort embodied in this work.  Of particular note are T. Howard, J. Tappin,
+and C. Eyles.
+
+The work to develop this image processing pipeline was funded through multiple grants from NASA and the NSF.
+The underlying algorithm is documented in L<an Astrophysical Journal article|http://www.boulder.swri.edu/~deforest/Papers_files/The%20Astrophysical%20Journal%202011%20Deforest.pdf>.
+
