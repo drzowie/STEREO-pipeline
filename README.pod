@@ -23,8 +23,59 @@ the individual images are used to separate background from desired features.
 =head1 LIMITATIONS
 
 As of Winter 2013, the pipeline has been tested on HI-1A and HI-2A data.  It is likely to work
-on HI-1B data (and testing will proceed in Spring 2013) but 
+on HI-1B data (and testing will proceed in Spring 2013) but will not work without modification 
+on HI-2B data due to the different focus characteristics of that instrument.
 
+The final data product represents photometric I<excess brightness> of I<moving objects> only:
+as with an unpolarized coronagraph, it is not possible to separate the steady F coronal background
+from a hypothetical steady K coronal component -- and therefore the brightness in the output 
+.FITS files represents only excess brightness above a quasi-steady background level that contains
+both F and some K.  For certain bright features (e.g. coronal mass ejections or corotating 
+interaction regions in the solar wind) the background is negligible; for others (e.g. small
+"puffs" or plasmoids in the solar wind) it is not.  The amplitude of bright features is 
+photometrically correct to within the limits of the instrument photometric calculation and may
+be used to calculate, e.g., excess electron surface densities or variations therein - but, for 
+example, the brightnesses of two faint features separated by more than a few days in time may not be 
+compared meaningfully and directly.
+
+The background-subtracted images also contain many artifacts, and the user is warned to watch
+for them.  In particular:
+  
+=over 3
+
+=item * Stellar "telegraph" print-through
+
+Pointlike sources undergo small fluctuations in apparent brightness as they cross the pixel grid.
+This effect is suppressed for faint stars, but bright stars' and planets' apparent brightness
+fluctuates enough (in an absolute sense) to remain once the primary bright point of the planet is
+removed.
+
+=item * Fourier motion-filter artifacts
+
+Venus and Mercury can, at certain phases, produce long-lasting artifacts that extend through space
+and time.  The artifacts can include converging and/or diverging motions or persistent bright spots.
+The artifacts are visually recognizable and should be avoided.
+
+Dust events from the spacecraft can produce single-frame bright streaks or several-frame bright
+points.  Data dropouts produce single-frame black rectangles.  Both types of event are amplified 
+by the Fourier motion filter, and can extend through several frames.  These artifacts are recognizable
+and should be avoided.
+
+In HI-2A images, the Earth occulter at the left side of the frame can contain strangely moving artifacts.
+These are not masked out, but should be ignored.
+
+=item * Starfield motion artifacts
+
+The pipeline relies on steady orbital motion and pointing from the spacecraft, to identify the starfield.
+It attempts to recognize and avoid pointing shifts such as the occasional roll maneuvers, but can be fooled
+by the occasional pointing excursions that are seen throughout the mission.  When small, these excursions
+are compensated by the pipeline - but when large, they cause persistent starfield-like artifacts that last
+for one batch time (7 days). 
+
+=back
+
+If you have questions, concerns, or bug reports, please contact the author at the e-mail address below, or 
+submit an Issue to the L<github site|http://github.com/drzowie/STEREO-pipeline>.
 
 =head1 AUTHOR, COPYRIGHT, LICENSE
 
