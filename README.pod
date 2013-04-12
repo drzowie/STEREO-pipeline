@@ -43,8 +43,85 @@ documentation for a description of options accepted by each.
 =head1 ROUTINES
 
 Here is a list of the routines that are included in the package, with a brief description of each.
+The first few are the main entry points; after that, they are listed in alphabetical order.
 
-=head2 
+=head2 hi1_pipeline_batch
+
+This is the main entry point to process an "official" batch for the pipeline.  It accepts a batch number
+and an options hash, attempts to locate all Level 1 data within the time for that batch, adn processes them
+with C<< hi1_pipeline >>.
+
+=head2 hi1_pipeline
+
+This is the main HI-1 processing pipeline.  It accepts a list ref containing the names of all the files to 
+process, and an options hash (optional).  The output files are deposited by default into the subdir "processed"
+of the current working directory.
+
+=head2 hi1_metapipeline
+
+The metapipeline processes a tranche of unofficial batches of files.  It was used for the initial work (in 2008-Dec)
+using the pipeline algorithms, and was necessary because the starfield distortion-map algorithm was quite slow at
+first and could not be run for each batch.  As of 2013, the distortion-map algorithm is fast enough to be run independently 
+for each batch of files, but the metapipeline is retained both for reference and in case it proves useful.
+
+
+=head2 hi2_pipeline
+
+=head2 hi2_metapipeline
+
+=head2 merge_batch_by_number
+
+=head2 merge_batches
+
+
+=head2 a_to_main
+
+=head2 centroid_stars
+
+=head2 clean_bad
+
+=head2 correlate_patch
+
+=head2 correlate_patch2
+
+=head2 delaunay
+
+=head2 final_zero
+
+=head2 find_stars
+
+=head2 get_distortion_params
+
+=head2 interp_onto_image
+
+=head2 make_backgrounds
+
+=head2 max_horiz_range
+
+=head2 motion_filter
+
+=head2 motion_filter-a
+
+=head2 null_stars
+
+=head2 remove_f_corona
+
+=head2 remove_fluctuations
+
+=head2 remove_polynomials
+
+=head2 shift_to_celestial
+
+=head2 shift_to_instrument
+
+=head2 spawn_fft
+
+=head2 subtract_backgrounds
+
+=head2 t_nl
+
+=head2 visualize_errors
+
 
 =head1 LIMITATIONS
 
