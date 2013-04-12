@@ -9,16 +9,42 @@ to model (and remove) background sources from the STEREO heliospheric imaging da
 kept as a collection of AutoLoader files in part because that style of development has become
 the norm in the solar physics community due to the widespread adoption of SolarSoft
 (http://ssw.lmsal.com), and in part because some of the tools are general-purpose enough that
-hiding them in a module could be counterproductive.
+hiding them in a module could be counterproductive.  To use the package, you must first 
+install Perl and PDL, then unpack the package into your file system and add an entry 
+C<< +<location>/STEREO-pipeline >> to your @PDLLIB variable inside PDL (where C<< <location> >> is
+the location into which you unpack the pipeline).  
 
-The routines accept Level 1 (photometrically calibrated) data from the STEREO/SECCHI instruments
+The routines accept Level 1 (photometrically calibrated) synoptic data from the STEREO/SECCHI instruments
 and extract from them a background model that is then subtracted and discarded.  They produce
-Thomson-scattered images of the transient solar wind and transient features within it. Typical 
-background rejection is 10^3-10^4.  In the case of data from STEREO-A HI-2, this means that 
-output noise levels are within a factor of ~3 of the photon noise floor of the data.
+Thomson-scattering images of the transient solar wind and transient features within it. Typical 
+background rejection is 3-4 orders of magnitude (i.e. the background is reduced from a few x 10^-11
+mean solar radiances to under 10^-14 mean solar radiances in the HI-1 pipeline).  In the case of data 
+from STEREO-A HI-2, this means that output noise levels are within a factor of ~3 of the photon noise floor of the data.
 
 The routines generally manipulate I<batches> of data, because spatiotemporal differences between 
-the individual images are used to separate background from desired features.
+the individual images are used to separate background from desired features.  The batches are merged
+after production, to produce individual Level 2 output files.  
+
+In standard usage, the pipeline organizes HI-1 data into 7 day batches that are staggered at 1/2 day
+intervals.  The batch epoch is midnight UT on 1-Jan-2007, some four months before the official start of science data, 
+and Batch 0 begins at that time and lasts for 7 days.  Batch 1 begins at noon UT on 1-Jan-2007; batch 730 begins 
+at midnight on 1-Jan-2008.  The batches are merged after processing, to produce near-full-frame data 
+with similar filenames as the original L1 data that were accepted
+for use in the pipeline.  The filenames are modified to reflect the Level 2 status of the files.
+
+=head1 OPTIONS PARSING
+
+Most of the routines use a rudimentary options hash to allow adjustment of the algorithm's behavior.
+If you do not specify an options hash, or omit an option, then sensible defaults are applied.
+Where one routine calls another, the options hash is "passed through".  The options are case sensitive
+and may not be abbreviated (which is why it is called "rudimentary").  See the individual modules'
+documentation for a description of options accepted by each.
+
+=head1 ROUTINES
+
+Here is a list of the routines that are included in the package, with a brief description of each.
+
+=head2 
 
 =head1 LIMITATIONS
 
@@ -43,14 +69,14 @@ for them.  In particular:
   
 =over 3
 
-=item * Stellar "telegraph" print-through
+=item * B<Stellar "telegraph" print-through>
 
 Pointlike sources undergo small fluctuations in apparent brightness as they cross the pixel grid.
 This effect is suppressed for faint stars, but bright stars' and planets' apparent brightness
 fluctuates enough (in an absolute sense) to remain once the primary bright point of the planet is
 removed.
 
-=item * Fourier motion-filter artifacts
+=item * B<Fourier motion-filter artifacts>
 
 Venus and Mercury can, at certain phases, produce long-lasting artifacts that extend through space
 and time.  The artifacts can include converging and/or diverging motions or persistent bright spots.
@@ -64,7 +90,7 @@ and should be avoided.
 In HI-2A images, the Earth occulter at the left side of the frame can contain strangely moving artifacts.
 These are not masked out, but should be ignored.
 
-=item * Starfield motion artifacts
+=item * B<Starfield motion artifacts>
 
 The pipeline relies on steady orbital motion and pointing from the spacecraft, to identify the starfield.
 It attempts to recognize and avoid pointing shifts such as the occasional roll maneuvers, but can be fooled
