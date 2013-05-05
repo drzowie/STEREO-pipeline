@@ -40,6 +40,8 @@ sub  remove_f_corona {
      $opt->{'REJECT_BY_SUM'} = 0.03 unless(exists($opt->{'REJECT_BY_SUM'})); 
      $opt->{'REJECT_BY_CROTA'} = 2 unless(exists($opt->{'REJECT_BY_CROTA'}));
      $opt->{'CLEAN_BAD'} = 1 unless(exists($opt->{'CLEAN_BAD'}));
+     $opt->{'BAD_DIL_PIX'} = 1 unless(exists($opt->{'BAD_DIL_PIX'}));
+     $opt->{'BAD_DIL_FR'} = 0 unless(exists($opt->{'BAD_DIL_FR'}));
 
      print cards($opt);
      # Make sure we have a data cube in usable form
@@ -134,10 +136,19 @@ sub  remove_f_corona {
      if($opt->{'CLEAN_BAD'}){
 	 my $badloc = whichND($ims->isbad);
 	 if($badloc->nelem){
-	     print "Found ".$badloc->nelem." bad locations.  Patching...";
-	     $ims->indexND($badloc) .= $ims->range($badloc-2,[5,5,5],'e')->clump(1,2,3)->mv(1,0)->average;
-	     $badloc = whichND($ims->isbad);
-	     print "Cube now has ".$badloc->nelem."\n";
+	     print "Found ".$badloc->nelem." bad locations.  Dilating with radius=$opt->{BAD_DIL_PIX} pixels, $opt->{BAD_DIL_FR} frames";
+	     for my $i (-$opt->{BAD_DIL_PIX}..$opt->{BAD_DIL_PIX}) {
+		 for my $j(-$opt->{BAD_DIL_PIX}..$opt->{BAD_DIL_PIX}) {
+		     next if($i*$i + $j*$j  >  $opt->{BAD_DIL_PIX} * $opt->{BAD_DIL_PIX});
+		     for my $fr(-$opt->{BAD_DIL_FR} .. $opt->{BAD_DIL_FR}) {
+			 p "($i,$j,$fr)\t";
+			 $ims->indexND($badloc + pdl($i,$j,$fr), 'e') .= $ims->badvalue;
+			 print ".";
+		     }
+		 }
+	     }
+	     print "\nNow there are ".($ims->isbad->sum)." bad values.  Cleaning up...";
+	     clean_baddies($ims, 2);
 	 }
      }
 

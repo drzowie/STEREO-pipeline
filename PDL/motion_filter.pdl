@@ -64,9 +64,9 @@ sub motion_filter {
     $opt->{FILTER_APOD_FRAMES} = 3      unless exists($opt->{FILTER_APOD_FRAMES});
     $opt->{FILTER_APOD_MARGIN} = 20     unless exists($opt->{FILTER_APOD_MARGIN});
     $opt->{FILTER_MASK_TRIGGER} = 0.667 unless exists($opt->{FILTER_MASK_TRIGGER});
-    $opt->{FILTER_MASK_FR_PM}   = 3     unless exists($opt->{FILTER_MASK_FR_PM});
-    $opt->{FILTER_US_SIZE}      = 11    unless exists($opt->{FILTER_US_SIZE});
-    $opt->{FILTER_DIL_SIZE}     = 5     unless exists($opt->{FILTER_DIL_SIZE});
+    $opt->{FILTER_DIL_FR}       = 3     unless exists($opt->{FILTER_DIL_FR});
+    $opt->{FILTER_DIL_PIX}     = 3      unless exists($opt->{FILTER_DIL_PIX});
+    $opt->{FILTER_FILL_FR}     = 0      unless exists($opt->{FILTER_FILL_FR});
     $opt->{FILTER_CUTOFF_PPF} = 1       unless exists($opt->{FILTER_CUTOFF_PPF});
     $opt->{FILTER_MAX_SIZE}     = 50    unless exists($opt->{FILTER_MAX_SIZE});
     $opt->{FILTER_CUBE} = "CEL"         unless exists($opt->{FILTER_CUBE});
@@ -89,39 +89,11 @@ sub motion_filter {
     $hash->{$fc}->where($hash->{$fc}->isbad) .= 0;
     $hash->{$fc."_UNFILTERED"} = $hash->{$fc}->copy;
 
-    print "Masking out points (mask trigger=$opt->{FILTER_MASK_TRIGGER})...";
-
-    for $i(0..$hash->{$fc}->dim(2)-1) {
-    	print "$i";
-	my $im = $hash->{$fc}->(:,:,($i));
-	if($opt->{FILTER_US_SIZE}) {
-	    # FILTER_US_SIZE is set -- unsharp-mask the image before masking.
-	    my $k = ( (rvals($opt->{FILTER_US_SIZE},$opt->{FILTER_US_SIZE})==0) -   # central spike
-		      ones($opt->{FILTER_US_SIZE},$opt->{FILTER_US_SIZE}) / $opt->{FILTER_US_SIZE}**2); # negative boxcar
-	    $im = $im->convolveND($k);
-	}
-		      
-	# Make an excessive-value mask, and dilate.
-	my $m = (  ($im->abs > $opt->{FILTER_MASK_TRIGGER})
-		   ->convolveND(
-		       (rvals( $opt->{FILTER_DIL_SIZE}*2+1, $opt->{FILTER_DIL_SIZE}*2+1) <= $opt->{FILTER_DIL_SIZE})
-		   )>= 1
-	    );	   
-	my $wnd = whichND($m);
-	print "(".$wnd->dim(1).") ";
-
-	# Mask out a few frames ahead and behind...
-	for my $j($i-$opt->{FILTER_MASK_FR_PM}..$i+$opt->{FILTER_MASK_FR_PM}){
-	    if($j>=0 and $j< $hash->{$fc}->dim(2)) {
-		$hash->{$fc}->(:,:,($j))->indexND(0+whichND($m!=0)) .= 0;
-	    }
-	}
-    }
-	
     my $c3 = ($hash->{$fm} * $hash->{$fc})->range( -$of,
 				       2*$of + pdl( $hash->{$fc}->dims ),
 				       'm'
 	)->sever;
+    print "of is $of\n";
     my $c3i = zeroes($c3);
     print "On initial range: c3 minmax is ".(join(",",$c3->minmax))."\n";
 
@@ -141,7 +113,7 @@ sub motion_filter {
     $c3->(:,:,-1:-$opt->{FILTER_APOD_FRAMES}:-1)->mv(2,0) *= $frames_rolloff;
 
     my $filtslop = $opt->{FILTER_SLOP};
-
+    
     my $filtfunc = sub {
         my $a = shift;
 	my $b = shift;
@@ -166,8 +138,8 @@ sub motion_filter {
 
     print "FFT...";
 
-    # ($c3, $c3i) = spawn_fft($c3,$c3i);
     fftnd($c3,$c3i);
+
 
     print "filtering...";
 
@@ -202,7 +174,6 @@ sub motion_filter {
 	print "i=$i; ct = $ct\n";
 
 	$filtplane = &$filtfunc($rv, $ct, $i/($c3->dim(2)/2) );
-
 	$c3->(:,:,($i)) *= $filtplane;
 	$c3i->(:,:,($i)) *= $filtplane;
 	$c3->(:,:,(-$i)) *= $filtplane;
@@ -210,15 +181,13 @@ sub motion_filter {
     }
 
 
-#    $c3->(:,:,(0)) .= 0;
-#    $c3i->(:,:,(0)) .= 0;
-
     my $c4 =$c3 -> copy;
     my $c4i=$c3i -> copy;
     
     print "inverse FFT (data)...";
 
 #  ($c3, $c3i) = spawn_fft($c3,$c3i,1);
+
     ifftnd($c3,$c3i);
 
     undef $c3i;

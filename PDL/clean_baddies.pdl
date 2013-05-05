@@ -1,0 +1,21 @@
+=head2 clean_baddies - interpolate into bad areas using median filtering.
+
+=cut
+
+
+sub clean_baddies {
+    my $cube  =shift;
+    my $crossframes = shift;
+    my $maxn = shift // 50;
+
+    my $badplaces;
+    do {
+	print "iteration $i ";
+	$badplaces = whichND($cube->isbad);
+	print "(".$badplaces->dim(1).")...";
+	my $loci = $cube->range($badplaces-pdl(1,1,$crossframes),[3,3,1+2*$crossframes],'e')->mv(0,3)->sever;
+	my $vals = $cube->range($badplaces,0,'e');
+	$vals .= $loci->clump(3)->medover;
+    } until ($badplaces->nelem == 0 or (--$maxn <= 0));
+    return $cube;
+}
