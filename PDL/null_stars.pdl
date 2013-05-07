@@ -1,17 +1,108 @@
-=head2 null_stars - hi2 pipeline component
+# -*-perl-*-
+use strict;
+
+=head2 null_stars - hi1/hi2 pipeline component
+
+=for usage
+
+ null_stars($hash);
+
+=for ref
+
+C<null_stars> carries out the linear stellar nulling operation in
+quasi-celestial coordinates, and also performs some simple bad value
+masking to remove places where the nulling operation fails
+egregiously.
+
+C<null_stars> operates on the CEL_CUBE data cube in the processing
+hash data structure.  In CEL_CUBE the data have been resampled to hold
+the celestial sphere fixed.  The same general trick as F corona
+removal is used to remove celestial features including nebulosity and
+even residual uncorrected smearing from bright stars (due to the
+shutterless operation of HI-1).  The values of each pixel are sorted
+by value and a low percentile value is treated as the background for
+that pixel and subtracted from each pixel across the entire image.
+
+The process is complicated by uncompensated nonlinearities in the
+SECCHI HI-1 calibration.  The flat fielding imposed by SECCHI_PREP (as
+of 2013) uses linear corrections only, and the intensity of bright
+stars in HI-1 and HI-2 may be underreported by about 1% due to
+detecter nonlinearities.  This would be a non-issue if the starfield
+were fixed on the detector, but as the star crosses pixel boundaries
+these nonlinearities are exercised or not depending on the stellar
+image's placement on the grid.  The resampling operation conserves
+I<reported> flux to a high degree of precision (numerical roundoff, or
+five orders of magnitude), but contains no correction for detector
+nonlinear effects.  Additional sources of twinkling could include
+subpixel gradients in gain, though it is expected that these would
+produce a different temporal pattern than the long-period off/on
+blinking that is present in HI1-A nulled sequences.  Stars with too
+much residual twinkling are masked out and replaced with the median of
+nearby pixels.
+
+The output is median-filtered over several pixels.  The default is huge
+by the standards of either the hi-1 or hi-2 pipeline.
+
+null_stars operates in-place on the CEL_CUBE field in the hash, and
+adds an appropriate line to the history log. 
+
+Options accepted are:
+
+=over 3
+
+=item * NULL_SMOOTH_FRAMES (default 1)
+
+This is the number of temporal frames over which to smooth the entire
+image via median filter.  The default (1) yields no smoothing; 3 would 
+yield +/- 1 frame, plus the current time, for each frame.
+
+=item * NULL_SMOOTH_SIZE (default [11,5])
+
+The default value is rather aggressive and is unnecessary for HI-1 data.
+The HI-1 pipieline performs 3x3 smoothing by default.
+
+=item * NULL_MIN_PCT (default 10) 
+
+This is the percentile value of each celestial pixel that should be
+used as a new minimum value for that particular pixel.  It is a hack
+at the noise distribution problem (sampling the minimum value of an
+image sequence tends to sample both the minimum value of the true data
+and also the minimum value of the associated noise floor).  Noisier
+images should use a higher percentile value; less noisy images should
+use a lower.  The HI-1 pipeline defaults to 5.
+
+=item * NULL_BADVAL_THRESH (default 3)
+
+After stellar nulling, surviving bad places in the image are
+identified by unsharp masking.  This step catches stellar
+print-through that is so strong that it is obviously bad.  The entire
+nulled data cube is unsharp masked with a 5x5 boxcar antismoothing
+kernel.  If the absolute value of the unsharp masked data is larger
+than NULL_BADVAL_THRESH times the standard deviation of the original
+data, the corresponding pixel is marked bad.  The bad values are
+dilated 5x5 and filled in with neighboring values.
+
+=back
 
 =cut
 
 sub null_stars {
     my $hash = shift;
     my $opt = shift;
+    $VERSION = "2.0 5-May-2013";
 
     $opt = {} unless defined($opt);
 
-    $opt->{NULL_SMOOTH_FRAMES}=1 unless(defined($opt->{NULL_SMOOTH_FRAMES}));
-    $opt->{NULL_SMOOTH_SIZE} = [11,5] unless(defined($opt->{NULL_SMOOTH_SIZE}));
-    $opt->{NULL_UNSHARP_FILTER} = 1.0 unless(defined($opt->{NULL_UNSHARP_FILTER}));
-    $opt->{NULL_MIN_PCT}     = 10 unless(defined($opt->{NULL_MIN_PCT}));
+    my $defaults = {
+	NULL_SMOOTH_FRAMES   => 1,         # Number of frames to smooth over for median filtering (1 = no smoothing)
+	NULL_SMOOTH_SIZE     => [11,5],    # Number of pixels (X,Y) to smooth over for median filtering
+	NULL_MIN_PCT         => 10,        # Percentile value to keep as the "zero" for each pixel
+	NULL_BADVAL_THRESH   => 3          # Bad-pixel threshold, in units of image average value (applied after unsharp masking)
+    };
+    
+    for my $k(keys %$defaults) {
+	$opt->{$k} = $defaults->{$k} unless exists($opt->{$k});
+    }
 
     ##############################
     # Main zeroing procedure - just like F corona, pick a low percentile value as the zero point.
@@ -41,11 +132,11 @@ sub null_stars {
 
     print "null_stars: finding residual star locations...\n";
 
-#    my $bkg = $hash->{CEL_CUBE}->mv(2,0)->average->med2d(ones(21,21))->mv(0,2)->sever;
     my $bkg = $hash->{CEL_CUBE}->avg;
 
     my $k = ((rvals(5,5)==0) - ones(5,5)/25);
     my $usm = $hash->{CEL_CUBE}->copy;
+    my $i;
     for $i(0..$usm->dim(2)-1){
     	$usm->(:,:,($i)) .= $hash->{CEL_CUBE}->(:,:,($i))->convolveND($k,bound=>'e');
     }
@@ -58,13 +149,11 @@ sub null_stars {
 	print "$i ";
     }
 
-    $h->{CEL_CUBE}->badflag(1);
-    my $locus = whichND($h2>=3);  # trying 3 instead of original 5
+    $hash->{CEL_CUBE}->badflag(1);
+    my $locus = whichND($h2 >= $opt->{NULL_BADVAL_THRESH} ); 
     # Dilate.
     $locus = ($locus - pdl(2,2,0) + ndcoords(5,5,1)->(:,*1))->mv(0,-1)->clump(3)->mv(-1,0)->sever;
-
-    $h->{CEL_CUBE}->range($locus,[0],'e') .= $h->{CEL_CUBE}->badvalue;
-
+    $hash->{CEL_CUBE}->range($locus,[0],'e') .= $hash->{CEL_CUBE}->badvalue;
     clean_baddies( $hash->{CEL_CUBE}, 0 );
 
 
@@ -78,7 +167,7 @@ sub null_stars {
 	$smooth = ones($opt->{NULL_SMOOTH_SIZE},$opt->{NULL_SMOOTH_SIZE});
     }
 
-    $nframes = int ( ($opt->{NULL_SMOOTH_FRAMES}-1)/2 ) * 2.0 + 1;
+    my $nframes = int ( ($opt->{NULL_SMOOTH_FRAMES}-1)/2 ) * 2.0 + 1;
 
     if($nframes <= 1) {
 	print "smooth is ",join("x",$smooth->dims);    
@@ -100,6 +189,7 @@ sub null_stars {
 	}
     }
 
+    push(@{$hash->{log}}, "  null_stars v$VERSION");
     return $hash;
 	
 }

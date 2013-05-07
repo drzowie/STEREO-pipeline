@@ -1,4 +1,27 @@
+#-*-perl-*-
+use strict;
+
 =head2 clean_baddies - interpolate into bad areas using median filtering.
+
+=for usage
+
+    clean_baddies($cube, $crossframes, $maxn);
+
+=for ref
+
+This little routine accepts a 3-D data cube, some of whose values are
+BAD, and fills it in with the median of the boundary. 
+
+The first argument is the cube itself, which is filled in-place.  The second
+is the number of frames to reach forward and backward to get boundary values.
+The third is the largest number of iterations to try (default 50 if you omit
+the argument) before all BAD values are scrubbed.
+
+The filling-in is done with sequential dilation of the non-BAD area.  After
+each dilation, the BAD area is recalculated.  If it doesn't shrink enough
+(1% required per iteration), then C<clean_baddies> throws an exception.
+
+If more than 10% of the values are BAD on entry, C<clean_baddies> throws an exception.
 
 =cut
 
@@ -9,9 +32,18 @@ sub clean_baddies {
     my $maxn = shift // 50;
 
     my $badplaces;
+
+    my $last_bad = $cube->nelem;
+
+    my $i = 0;
+
     do {
 	print "iteration $i ";
 	$badplaces = whichND($cube->isbad);
+	
+	die "clean_baddies: too many bad values!" if ($badplaces->dim(1) > $cube->nelem / 10);
+	die "clean_baddies: Not enough progress, I quit (1% required)" if($badplaces->dim(1) / $last_bad > 0.99);
+
 	print "(".$badplaces->dim(1).")...";
 	my $loci = $cube->range($badplaces-pdl(1,1,$crossframes),[3,3,1+2*$crossframes],'e')->mv(0,3)->sever;
 	my $vals = $cube->range($badplaces,0,'e');

@@ -1,15 +1,68 @@
+use strict;
+#-*-perl-*-
+
+=head2 shift_to_celestial - resample from instrument to fixed-celestial coordinates.
+
+=for usage
+
+    shift_to_celestial( $hash, $opt );
+
+=for ref
+
+C<shift_to_celestial> is part of the HI-1/HI-2 pipeline.  It is used
+to "freeze" the starfield by resampling the data cube to
+quasicelestial coordinates.  It uses the C<D_PARAMS> field that is set
+by C<get_distortion_params2>, so you need to call that first.  The
+distortion parameters provide a coordinate transformation in which the 
+displacement of the starfield is presumed to be exactly horizontal and
+linear in time.
+
+Each image is displaced to the temporal center of the data set as
+calculated form the headers (and stored in the C<D_PARAMS> field),
+using the linear time relation.
+
+There is also some logic to dejitter images -- that is, to provide a
+small secondary correction to their pointing to patch up any jitter or
+systematic irregularity in the overall distortion.  The center portion
+of each image is correlated with a single "master patch" from near the
+center of the time range; a small jitter correction is applied to
+maximize the correlation function.  For historical reasons, a (slow)
+direct correlation and amoeba fit is used instead of the far faster
+fit that's used by get_distortion_params2.
+
+The resampling uses C<PDL::Transform>'s C<map> function.  You should
+use either the default 'j' or 'h' as an interpolation method, to avoid
+resampling artifacts.
+
+Options are:
+
+=over 3
+
+=item ALIGN_DEJITTER - flag indicating whether to perform dejittering
+
+=item ALIGN_PATCHSIZE - the size of the square alignment patch, in pixels
+
+=item INTERP_METHOD - the interpolation method to use ('j' by default)
+
+=back
+
+=cut
+
+
 sub shift_to_celestial {
     my $hash = shift;
     my $opt = shift;
+
+    my $VERSION = "2.0 5-May-2013";
 
     $opt = {} unless(defined $opt);
     $opt->{'ALIGN_DEJITTER'} = 1    unless(defined $opt->{'ALIGN_DEJITTER'});
     $opt->{'ALIGN_PATCHSIZE'} = 50  unless(defined $opt->{'ALIGN_PATCHSIZE'});
     $opt->{'INTERP_METHOD'} = 'j'   unless(defined $opt->{'INTERP_METHOD'}); # use default for science
     
-
-    $xr = $hash->{'D_PARAMS'}->{'xr'};
-    $yr = $hash->{'D_PARAMS'}->{'yr'};
+    my $i;
+    my $xr = $hash->{'D_PARAMS'}->{'xr'};
+    my $yr = $hash->{'D_PARAMS'}->{'yr'};
 
     if(!defined($xr)) {
 	die("shift_to_celestial: hash->{D_PARAMS}->{xr} not defined!");
@@ -53,11 +106,11 @@ sub shift_to_celestial {
 
     
     for $i(0..$hash->{'BKSUB_CUBE'}->dim(2)-1) {
-	print "Resampling image $i of ".$hash->{'BKSUB_CUBE'}->dim(2)."...\n";
+	print "Resampling image $i of ".$hash->{'BKSUB_CUBE'}->dim(2)." ";
 
 	my $delta_t =  ($t0 - $hash->{'UTIME'}->(($i)) ) / 3600 /24;
 	my $orbital_rotation = $hash->{'D_PARAMS'}->{'ospeed'} * $delta_t;
-	print "Shifting by $delta_t days ($orbital_rotation degrees)...\n";
+	print "by $delta_t days ($orbital_rotation degrees)...\n";
 	my $t_o = t_linear(pre=> [ $orbital_rotation, 0]);
 	my $corr;
 	my $nudge;
@@ -122,6 +175,6 @@ sub shift_to_celestial {
 
     }
     
-    
+    push(@{$hash->{log}}, "  shift_to_celestial v$VERSION");    
     return $hash;
 }

@@ -1,19 +1,89 @@
+#-*-perl-*-
+use strict;
+
+=head2 clean_telegraph - remove telegraph-like pixels after stellar nulling
+
+=for usage
+
+    clean_telegraph( $h, $opt );
+
+=for ref
+
+C<clean_telegraph> is part of the HI-1/HI-2 cleaning pipeline.  It is
+used to remove blinkety stars and such that are present after the
+stellar nulling operation in C<null_stars>.  The fundamental problem
+is that C<null_stars> leaves blinky artifacts near intermediate
+brightness stars.  This is attributable to two effects, both of which
+are instrumental: (1) possible subpixel variations in gain on the
+detector; (2) nonlinearity in the detector.  Nonlinearity, in
+particular, affects stars because the total photometric signal from a
+star might vary by as much as 1% depending on its phase relative to
+the pixel grid.
+
+C<clean_telegraph> finds two types of artifact: spatial spikes, and
+spatiotemporal spikes.
+
+First the data are unsharp masked using a boxcar unsharp mask in the
+spatial directions.  These unsharp masked frames are used to find
+spikes that exceed an absolute value.  The spikes are masked BAD.
+Then the frames are also unsharp masked in the temporal direction, and
+absolute spikes in that direction are set to BAD as well.  
+
+Then bad locations are dilated in time and space, and filled in with 
+median-filtered boundary pixels usinc C<clean_baddies>.
+
+Options are:
+
+=over 3
+
+=item TELEGRAPH_CUBE - which data cube to operate on (default is "CEL")
+
+=item TELEGRAPH_US_SIZE - the size of the unsharp mask (default is 9)
+
+=item TELEGRAPH_MASK_TRIGGER - spatiotemporal trigger (normalized; default 0.5)
+
+After spatiotemporal unsharp masking, any value that exceeds the MASK_TRIGGER
+times the RMS value of the entire data set is set BAD.
+
+=item TELEGRAPH_SPIKE_TRIGGER - spatial trigger (absolute; default 1e-13)
+
+After spatial unsharp masking, any value that exceeds the
+SPIKE_TRIGGER is set BAD.  Note that this value is NOT normalized - it
+is an absolute image data value.
+
+=item TELEGRAPH_DIL_PIX - spatial dilation size (default 2)
+
+Each BAD value is dilated DIL_PIX pixels in all spatial directions
+before being filled in.
+
+=item TELEGRAPH_DIL_FR - temporal dilation size (default 2)
+
+Each BAD value is dilated DIL_FR frames in time before being filled in.
+
+=back
+
+=cut
+
 sub clean_telegraph {
     my $hash = shift;
     my $opt = shift;
 
+    my $VERSION = "2.0 5-May-2013";
+
     $opt = {} unless defined($opt);
 
-    $opt->{TELEGRAPH_CUBE}         = "CEL" unless exists($opt->{TELEGRAPH_CUBE});
-    $opt->{TELEGRAPH_MASK_TRIGGER} = 0.5 unless exists($opt->{TELEGRAPH_MASK_TRIGGER});
-    $opt->{FILTER_MASK_TRIGGER}    = 1e-13 unless exists($opt->{FILTER_MASK_TRIGGER});
-    $opt->{FILTER_DIL_PIX} = 2             unless(exists($opt->{FILTER_DIL_PIX}));
+    $opt->{TELEGRAPH_CUBE}            = "CEL"  unless exists($opt->{TELEGRAPH_CUBE});
+    $opt->{TELEGRAPH_MASK_TRIGGER}    = 0.5    unless exists($opt->{TELEGRAPH_MASK_TRIGGER});
+    $opt->{TELEGRAPH_US_SIZE}         = 9      unless exists($opt->{TELEGRAPH_US_SIZE}); 
+    $opt->{TELEGRAPH_SPIKE_TRIGGER}   = 1e-13  unless exists($opt->{TELEGRAPH_SPIKE_TRIGGER});
+    $opt->{TELEGRAPH_DIL_PIX}         = 2      unless(exists($opt->{TELEGRAPH_DIL_PIX}));
+    $opt->{TELEGRAPH_DIL_FR}          = 2      unless(exists($opt->{TELEGRAPH_DIL_FR}));
 
     my $fc = $opt->{TELEGRAPH_CUBE}."_CUBE";
     
-#    print "Masking out points (mask trigger=$opt->{TELEGRAPH_MASK_TRIGGER})...";
-    my $usc = $hash->{$fc}->convolveND( (rvals(float,9,9)==0) - ones(float,9,9)/81);
-
+    print "unsharp masking for telegraph...";
+    my $us_siz = $opt->{TELEGRAPH_US_SIZE};
+    my $usc = $hash->{$fc}->convolveND( (rvals(float,$us_siz,$us_siz)==0) - ones(float,$us_siz,$us_siz)/($us_siz*$us_siz));
 
     print "Masking out telegraph points..";
     my ($fca, , , , , ,$fcrms) = $hash->{$fc}->mv(2,0)->statsover;
@@ -23,7 +93,7 @@ sub clean_telegraph {
 
     $tg /= $fca;
 
-    my $masknd = ($usc->abs > $opt->{FILTER_MASK_TRIGGER})->byte;
+    my $masknd = ($usc->abs > $opt->{TELEGRAPH_SPIKE_TRIGGER})->byte;
     $masknd |= (!isfinite($usc));
     $masknd |= ($tg > $opt->{TELEGRAPH_MASK_TRIGGER});
     my $wnd = whichND($masknd);
@@ -31,13 +101,13 @@ sub clean_telegraph {
 
     print "Identified ".$wnd->dim(1)." telegraph points\n";
 
-    print "Dilating by +/- ".(0+$opt->{FILTER_DIL_PIX})."\n";
+    print "Dilating by +/- ".(0+$opt->{TELEGRAPH_DIL_PIX})."\n";
     $hash->{$fc}->badflag(1);    
-    for my $i(-$opt->{FILTER_DIL_PIX} .. $opt->{FILTER_DIL_PIX}) {
-	for my $j(-$opt->{FILTER_DIL_PIX} .. $opt->{FILTER_DIL_PIX}) {
-	    next if( sqrt($i * $i + $j * $j) > $opt->{FILTER_DIL_PIX} );
+    for my $i(-$opt->{TELEGRAPH_DIL_PIX} .. $opt->{TELEGRAPH_DIL_PIX}) {
+	for my $j(-$opt->{TELEGRAPH_DIL_PIX} .. $opt->{TELEGRAPH_DIL_PIX}) {
+	    next if( sqrt($i * $i + $j * $j) > $opt->{TELEGRAPH_DIL_PIX} );
 	    
-	    for my $f(-$opt->{FILTER_DIL_FR} .. $opt->{FILTER_DIL_FR}) {
+	    for my $f(-$opt->{TELEGRAPH_DIL_FR} .. $opt->{TELEGRAPH_DIL_FR}) {
 		my $of0 = pdl($i,$j,$f);
 		$hash->{$fc}->indexND($of0 + $wnd,'t') .= $hash->{$fc}->badvalue;
 		print ".";
@@ -47,5 +117,7 @@ sub clean_telegraph {
     print "\n";
 
     clean_baddies($hash->{$fc});
+
+    push(@{$hash->{log}}, "  clean_telegraph v$VERSION");
     return $hash;
 }

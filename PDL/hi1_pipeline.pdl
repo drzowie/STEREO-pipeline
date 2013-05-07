@@ -1,3 +1,6 @@
+#-*-perl-*-
+use strict;
+
 =head2 hi1_pipeline - invoke the background-subtraction pipeline on a single batch of hi1 data.
 
 =for usage
@@ -12,49 +15,59 @@ directory.
 
 =cut
 $PDL::BIGPDL = 1;
+use Date::Format;
 
 sub hi1_pipeline {
     my $in_list = shift;
     my $opt = shift;
+    my $VERSION = "2.0 (5-May-2013)";
+    my $i;
 
     my $opt_defaults = {
 
 	OUTPUT_DIR		=> 'processed', # where to put output files
 	OUTPUT_FILES		=> 1,           # Whether to generate output
+	KEEP_DATA               => 0,           # Whether to keep (and return) the data cubes
+	KEEP_NULLED             => 1,           # Whether to keep the stellar nulled data as well as motion-filtered.
 
-	pct			=> 2,     # 2% for F corona
-	sm                      => undef, # [5,50],            
-	bin			=> 0,
-	REMOVE_FLUCTUATIONS	=> 1,
-	MASK_RADIUS             => 0,
-	MARK_BAD                => 0,
+	pct			=> 2,     # 2% for F corona - could be smaller maybe, but works OK
+	sm                      => 0,     # No smoothing at the remove_f_corona stage
+	bin			=> 0,     # don't bother rebinning 2k x 2k images - just reject them
+	REMOVE_FLUCTUATIONS	=> 1,     # Do remove exposure fluctuations
+	MASK_RADIUS             => 0,     # No radial masking
+	MARK_BAD                => 0,     # Don't bother marking bad elements
+	BAD_DIL_FR              => 0,     # Items marked bad should not be dilated across frames
+	BAD_DIL_PIX             => 1.5,   # Dilate spatially by +/- 1.5 pixel (3 total)
 
-	DIST_CORRTIME           => 3,
-	DIST_CORR_NSAMP		=> 40,
-	DIST_CORR_RSIZE         => 35,
-	DIST_CORR_PSIZE         => 35,
-	DIST_GUESS_DRIFTRATE    => 260/5,
+	DIST_CORRTIME           => 3,       # Use 3-day correlation
+	DIST_CORR_NSAMP		=> 40,      # 40 x 40 samples
+	DIST_CORR_RSIZE         => 35,      # 35 pixel radius for guesses
+	DIST_CORR_PSIZE         => 35,      # 35 pixel radius patch size for final correlation
+	DIST_GUESS_DRIFTRATE    => 260/5,   # Initial guess is 260 pixels in 5 days
 
-	NULL_MIN_PCT		=> 5,
-	NULL_SMOOTH_SIZE	=> [3,3],
-	NULL_SMOOTH_FRAMES      => 1,
-	NULL_UNSHARP_FILTER     => 6,
+	NULL_MIN_PCT		=> 5,      # Null stars to the 5th percentile
+	NULL_SMOOTH_SIZE	=> [3,3],  # Smooth 3x3 pixels with a median filter.
+	NULL_SMOOTH_FRAMES      => 1,      # Actually do the smoothing
+	NULL_UNSHARP_FILTER     => 6,      # Radius for the unsharp-filter mask used to find residual spikes
 
-	MIN_SMOOTH_SIZE		=> 5,
-	POLY_ORDER              => 4,
+	ALIGN_DEJITTER          => 1,      # Dejitter by correlating frames during resampling to celestial coords
 
-	ALIGN_DEJITTER          => 1,
-
-	MOTION_FILTER           => 1,
-	FILTER_APOD_FRAMES      => 5,
-	FILTER_MAX_SIZE         => 30,
-	FILTER_APOD_MARGIN      => 40,
-	FILTER_MASK_TRIGGER     => 1e-12,
-	FILTER_US_SIZE		=> 11,
-	FILTER_CUTOFF_PPF       => 1,
-	FILTER_HYPERSMOOTHING   => 1,
-	FILTER_REMOVE_FIXED     => 0,
-	FILTER_ZAP_HF           => 0,
+	TELEGRAPH_US_SIZE       => 9,      # Diameter of unsharp mask in telegraph step
+	TELEGRAPH_MASK_TRIGGER  => 3,      # Anything more than 3x the local smoothed RMS value is a telegraph pixel
+	TELEGRAPH_SPIKE_TRIGGER => 1e-13,  # Anything larger than this in the unsharp-masked image is bad
+	TELEGRAPH_DIL_FR        => 2,      # Dilate bad values +/- this many frames
+	
+	MOTION_FILTER           => 1,      # Carry out motion filtering
+	FILTER_APOD_FRAMES      => 5,      # Apodize by 5 frames
+	FILTER_APOD_MARGIN      => 40,     # Apodize edges by 40 pixels
+	FILTER_MAX_SIZE         => 30,     # Allow objects larger than 30 pixels to persist even if not moving
+	FILTER_US_SIZE		=> 11,     # Unsharp-mask size for the badmask
+	FILTER_DIL_SIZE         => 3,      # Dilate bad values +/- this many pixels
+	FILTER_SLOP             => 0.5,    # Very smooth motion filter cutoff to minimize ringing
+	FILTER_CUTOFF_PPF       => 1,      # Anything slower than one pixel per frame gets nixed
+	FILTER_HYPERSMOOTHING   => 1,      # Hypersmooth the background
+	FILTER_REMOVE_FIXED     => 0,      # Don't remove the fixed component
+	FILTER_ZAP_HF           => 0,      # Don't truncate the high wavevector corners of the Brillouin zone
 
 	PIXEL_XRANGE            => pdl(2,1022),
 	PIXEL_YRANGE            => pdl(2,1022),
@@ -64,7 +77,6 @@ sub hi1_pipeline {
 
     };
 
-
     my $k;
     for $k(keys %$opt_defaults) {
 	$opt->{$k} = $opt_defaults->{$k} unless(exists($opt->{$k}));
@@ -73,92 +85,102 @@ sub hi1_pipeline {
     our $hash;
 	
     $hash = remove_f_corona($in_list, $opt);      # initial f coronal background sub
-    delete $hash->{RAW_CUBE};
+
+    delete $hash->{RAW_CUBE} unless($opt->{KEEP_DATA});
 
     print "distortion parameters...\n";
     get_distortion_params2($hash, $opt);   # measure stellar drift
 
-
-#    print "Despiking...\n";
-#    
-#    for $i(0..$hash->{BKSUB_CUBE}->dim(2)-1){
-#	my $im = spikejones($hash->{BKSUB_CUBE}->(:,:,($i)),{dilation=>1});
-#	$im = spikejones($im,{dilation=>2});
-#	$hash->{BKSUB_CUBE}->(:,:,($i)) .= $im;
-#	print "$i...";
-#    }
-#    print "\n";
-#    print "Removing polynomials...\n";
-#    $opt->{POLY_CUBE} = "BKSUB";
-#    local($opt->{POLY_PRESMOOTH}) = 5;
-#    remove_polynomials($hash,$opt);       # remove slow background drift
-
     print "shift_to_celestial...\n";
     shift_to_celestial($hash, $opt);      # nullify stellar drift
-    
-    if($opt->{DEBUG_PIPELINE}) {
-	$a = $opt->{OUTPUT_DIR}."-cel";
-	`mkdir $a`;
-	for $i(0..$hash->{CEL_CUBE}->dim(2)-1){
-	    my $im = $hash->{CEL_CUBE}->(:,:,($i))->copy;
-	    $im->sethdr($hash->{RAW_HDRS}->[$i]);
-	    wfits($im, sprintf("%s/frame-%4.4d.fits",$a,$i));
-	}
-    }
 
-    delete $opt->{BKSUB_CUBE};
+    delete $hash->{BKSUB_CUBE} unless($opt->{KEEP_DATA});
 
     print "null_stars...\n";
     null_stars($hash, $opt);              # try to cancel out the starfield
 
-    print "Write nulled stuff...\n";
-    $a = $opt->{OUTPUT_DIR}."-nofft";
-    `mkdir $a` if($opt->{DEBUG_PIPELINE});
+    my $datestr = time2str("%Y-%m-%dT%H:%M:%SZ",time,"Z");
 
-    print "i: ".$opt->{CLEAN_MARGIN_FRAMES}."..".$hash->{CEL_CUBE}->dim(2)-1-$opt->{CLEAN_MARGIN_FRAMES}."\n";
+    if($opt->{KEEP_NULLED}) {
+	local($hash->{log});
+	print "Shift nulled data to instrument coords...\n";
 
-    if($opt->{DEBUG_PIPELINE}) {
-        for $i($opt->{CLEAN_MARGIN_FRAMES}..$hash->{CEL_CUBE}->dim(2)-1-$opt->{CLEAN_MARGIN_FRAMES}) {
-	    my $im = $hash->{CEL_CUBE}->(:,:,($i))->copy;
-	    $im->sethdr($hash->{RAW_HDRS}->[$i]);
-	    my $fname = sprintf("%s/frame-%4.4d.fits",$a,$i);
-	    wfits($im,$fname);
+	shift_to_instrument($hash,$opt);
+
+	$hash->{NULLED_CUBE} = $hash->{CLEAN_CUBE};
+	delete $hash->{CLEAN_CUBE};
+	$hash->{NULLED_log} = [@{$hash->{log}}];
+	
+	if($opt->{OUTPUT_FILES}) {
+	    `mkdir $opt->{OUTPUT_DIR}-S`;
+	    for $i(0..$hash->{NULLED_CUBE}->dim(2)-1) {
+		my $im = $hash->{NULLED_CUBE}->(:,:,($i));
+		
+		# Deep copy the FITS header to save the contents for later...
+		my $hdr = new Astro::FITS::Header( Cards => [(tied %{$hash->{RAW_HDRS}->[$i]})->cards] );
+		my %hdrhash;
+		tie %hdrhash, "Astro::FITS::Header", $hdr;
+		$im->sethdr(\%hdrhash);
+		
+		$im->hdr->{DATE} = $datestr;
+		$im->hdr->{DATE_COMMENT} = "Pipeline time";
+		$im->hdr->{HISTORY} .= "Processed with SwRI HI_1 pipeline $VERSION. Filters:\n";
+		for(@{$hash->{log}}) {$im->hdr->{HISTORY} .= $_."\n"}
+		$im->hdr->{FILENAME} =~ s/_1(....\.fts)$/_2S$1/;
+		$im->hdr->{ORIGIN} = "SwRI / postprocessing only";
+		$im->hdr->{COMMENT} .= "Starfield nulled using SwRI batch processing (some artifacts may remain)";
+		$im->hdr->{COMMENT} .= "** This is a batch file intended to be merged with others **";
+		
+		my $fname = sprintf("%s-S/S-clean-%s--BATCH-%s.fits",
+				    $opt->{OUTPUT_DIR}, 
+				    $im->hdr->{'DATE-OBS'},
+				    $hash->{RAW_HDRS}->[0]->{'DATE-OBS'}
+		    );
+		printf("Writing %d of %d: %s\n",$i,$hash->{NULLED_CUBE}->dim(2)-1, $fname );
+		wfits($im, $fname);
+	    }
 	}
-	print "Done writing nulled stuff...\n";
+
+	delete $hash->{NULLED_CUBE} unless($opt->{KEEP_DATA});
     }
 
-    if($opt->{MOTION_FILTER}) {
-	print "Motion filter...\n";
-	motion_filter($hash,$opt);  # final clean... I hope.	
-    } else {
-	print "No motion filter...\n";
-    }
+    print "Clean telegraph...\n";
+    clean_telegraph($hash,$opt);
 
-    if($opt->{DEBUG_PIPELINE}){
-	$a = $opt->{OUTPUT_DIR}."-fft";
-	`mkdir $a`;
-	print "i: ".$opt->{CLEAN_MARGIN_FRAMES}."..".$hash->{CEL_CUBE}->dim(2)-1-$opt->{CLEAN_MARGIN_FRAMES}."\n";
-	for $i($opt->{CLEAN_MARGIN_FRAMES}..$hash->{CEL_CUBE}->dim(2)-1-$opt->{CLEAN_MARGIN_FRAMES}) {
-	    print "$i\n";
-	    my $im = $hash->{CEL_CUBE}->(:,:,($i))->copy;
-	    $im->sethdr($hash->{RAW_HDRS}->[$i]);
-	    my $fname = sprintf("%s/frame-%4.4d.fits",$a,$i);
-	    printf("Writing test file %d of %d\n",$i,$hash->{CEL_CUBE}->dim(2)-1);
-	    wfits($im,$fname);
-	}
-    }
+    print "Motion filter...\n"; 
+    motion_filter($hash,$opt);
 
-    shift_to_instrument($hash,$opt);      # put back in instrument coordinates
+    print "Second null...\n";
+    null_stars($hash,$opt);
+
+    print "Shift back to instrument...\n";
+    shift_to_instrument($hash,$opt);
 
     # Dump output to files...
-    `mkdir $opt->{OUTPUT_DIR}`;
     if($opt->{OUTPUT_FILES}) {
+        `mkdir $opt->{OUTPUT_DIR}-M`;
 	for $i($opt->{CLEAN_MARGIN_FRAMES}..$hash->{CLEAN_CUBE}->dim(2)-1-$opt->{CLEAN_MARGIN_FRAMES}) {
 	    my $im = $hash->{CLEAN_CUBE}->(:,:,($i))->copy;
+
 	    $im->sethdr($hash->{RAW_HDRS}->[$i]);
-	    my $fname = sprintf ("%s/clean-%s--BATCH-%s.fits", $opt->{OUTPUT_DIR}, $im->hdr->{'DATE-OBS'}, $hash->{RAW_HDRS}->[0]->{'DATE-OBS'});
+	    $im->hdr->{DATE} = $datestr;
+	    $im->hdr->{DATE_COMMENT} = "Pipeline time";
+	    $im->hdr->{HISTORY} .= "Processed with SwRI HI_1 pipeline $VERSION. Filters:\n";
+	    for(@{$hash->{log}}) {$im->hdr->{HISTORY} .= $_."\n"}
+	    $im->hdr->{FILENAME} =~ s/_1(....\.fts)$/_2S$1/;
+	    $im->hdr->{ORIGIN} = "SwRI / postprocessing only";
+	    $im->hdr->{COMMENT} .= "Motion-filtered using SwRI batch processing (some artifacts may remain)";
+	    $im->hdr->{COMMENT} .= "** This is a batch file intended to be merged with others **";
+
+	    my $fname = sprintf ("%s-M/M-clean-%s--BATCH-%s.fits", 
+				 $opt->{OUTPUT_DIR}, 
+				 $im->hdr->{'DATE-OBS'}, 
+				 $hash->{RAW_HDRS}->[0]->{'DATE-OBS'}
+		);
+
 	    printf("Writing file %d of %d: %s\n",  $i,  $hash->{CLEAN_CUBE}->dim(2) - 1,  $fname);
 	    wfits($im, $fname);
 	}
-    }    
+    }
+    print "Returning...\n";
 }

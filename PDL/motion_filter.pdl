@@ -1,3 +1,6 @@
+#-*-perl-*-
+use strict;
+
 =head2 motion_filter - hi2 pipeline component
 
 =for ref
@@ -12,7 +15,8 @@ The number of frames (temporal) on either end of the data set that are occupied 
 
 =item FILTER_APOD_MARGIN
 
-The number of pixels (spatial) on the data boundary that are occupied by the apodization window
+The number of pixels (spatial) on the data boundary that are occupied
+by the apodization window
 
 =item FILTER_CUTOFF_PPF
 
@@ -20,22 +24,26 @@ This is the cutoff speed, in pixels per frame
 
 =item FILTER_MAX_SIZE
 
-This is the largest size of object (lowest spatial frequency) that is filtered. The filter is rolled
-to allpass at the corresponding spatial frequency, so objects larger than this threshold aren't affected
-by the motion filter.
+This is the largest size of object (lowest spatial frequency) that is
+filtered. The filter is rolled to allpass at the corresponding spatial
+frequency, so objects larger than this threshold aren't affected by
+the motion filter.
 
 =item FILTER_SLOP
 
-The width of the filter boundary apodization region (fraction of filter cutoff frequency)
+The width of the filter boundary apodization region (fraction of
+filter cutoff frequency)
 
 =item FILTER_MASK_TRIGGER
 
-Pixels with larger absolute value than this are considered to be noise and are replaced with 0.
+Pixels with larger absolute value than this are considered to be noise
+and are replaced with 0.
 
 =item FILTER_CUBE
 
-This is a string that contains the key prefix for the data cube to filter in the supplied hash.  (usually
-"CEL" as the hi-1 and hi-2 pipelines use that cube to hold the celestial-coordinate dataset).
+This is a string that contains the key prefix for the data cube to
+filter in the supplied hash.  (usually "CEL" as the hi-1 and hi-2
+pipelines use that cube to hold the celestial-coordinate dataset).
 
 =item FILTER_REMOVE_FIXED
 
@@ -43,10 +51,20 @@ If this is nonzero, the D.C. component of the data is replaced with 0.
 
 =item FILTER_HYPERSMOOTHING
 
-If this is nonzero, then a hypersmoothed copy of the data is used to find the zero value.  It defaults
-to 10 (10x hypersmoothing).  If you set it to 0, then no hypersmoothing is performed.   Note that it
-makes no sense to do hypersmoothing and also remove the fixed offset with FILTER_REMOVE_FIXED, since
-this step obviates the D.C. component anyway.
+If this is nonzero, then a hypersmoothed copy of the data is used to
+find the zero value.  It defaults to 10 (10x hypersmoothing).  If you
+set it to 0, then no hypersmoothing is performed.  Note that it makes
+no sense to do hypersmoothing and also remove the fixed offset with
+FILTER_REMOVE_FIXED, since this step obviates the D.C. component
+anyway.
+
+=item FILTER_ZAP_HF
+
+If this is nonzero, it is a fraction of the spatiotemporal Nyquist
+frequency that is used to mask out the highest-omega, highest-k
+portion of the data space.  This defaults to 0 as it turns out to
+not be as useful as originally thought. (Try 0.75 if you want to 
+experiment - but look out for ringing).
 
 =back
 
@@ -57,6 +75,8 @@ use PDL::NiceSlice;
 sub motion_filter {
     my $hash = shift;
     my $opt = shift;
+
+    my $i;
     
     $opt = {} unless defined($opt);
 
@@ -64,15 +84,12 @@ sub motion_filter {
     $opt->{FILTER_APOD_FRAMES} = 3      unless exists($opt->{FILTER_APOD_FRAMES});
     $opt->{FILTER_APOD_MARGIN} = 20     unless exists($opt->{FILTER_APOD_MARGIN});
     $opt->{FILTER_MASK_TRIGGER} = 0.667 unless exists($opt->{FILTER_MASK_TRIGGER});
-    $opt->{FILTER_DIL_FR}       = 3     unless exists($opt->{FILTER_DIL_FR});
-    $opt->{FILTER_DIL_PIX}     = 3      unless exists($opt->{FILTER_DIL_PIX});
-    $opt->{FILTER_FILL_FR}     = 0      unless exists($opt->{FILTER_FILL_FR});
     $opt->{FILTER_CUTOFF_PPF} = 1       unless exists($opt->{FILTER_CUTOFF_PPF});
     $opt->{FILTER_MAX_SIZE}     = 50    unless exists($opt->{FILTER_MAX_SIZE});
     $opt->{FILTER_CUBE} = "CEL"         unless exists($opt->{FILTER_CUBE});
     $opt->{FILTER_REMOVE_FIXED} = 0     unless exists($opt->{FILTER_REMOVE_FIXED});
     $opt->{FILTER_HYPERSMOOTHING} = 10  unless exists($opt->{FILTER_HYPERSMOOTHING});
-    $opt->{FILTER_ZAP_HF} = 0.75   unless exists($opt->{FILTER_ZAP_HF});
+    $opt->{FILTER_ZAP_HF} = 0           unless exists($opt->{FILTER_ZAP_HF});
 
 
     my $of = pdl( $opt->{FILTER_APOD_MARGIN}, 
@@ -154,7 +171,7 @@ sub motion_filter {
 
     if($opt->{FILTER_REMOVE_FIXED}) {
       print "CLOBBERING FIXED COMPONENT\n";
-      $keep = $c3->((0),(0),(0));
+      my $keep = $c3->((0),(0),(0));
       $c3->(:,:,(0)) .= 0;
       $c3->((0),(0),(0)) .= $keep;
       $c3i->(:,:,(0)) .= 0;
@@ -173,7 +190,7 @@ sub motion_filter {
 	}
 	print "i=$i; ct = $ct\n";
 
-	$filtplane = &$filtfunc($rv, $ct, $i/($c3->dim(2)/2) );
+	my $filtplane = &$filtfunc($rv, $ct, $i/($c3->dim(2)/2) );
 	$c3->(:,:,($i)) *= $filtplane;
 	$c3i->(:,:,($i)) *= $filtplane;
 	$c3->(:,:,(-$i)) *= $filtplane;
@@ -201,14 +218,14 @@ sub motion_filter {
 
     if($opt->{FILTER_HYPERSMOOTHING}) {
         print "Filtering...\n";
-	$c4dims = pdl($c4->dims);
-	$rv2d = rvals($c4dims->(0:1)->list, {center=>[($c4dims->(0:1)/2)->list]})->range($c4dims->(0:1)/2,$c4dims->(0:1),'p')->sever;
+	my $c4dims = pdl($c4->dims);
+	my $rv2d = rvals($c4dims->(0:1)->list, {center=>[($c4dims->(0:1)/2)->list]})->range($c4dims->(0:1)/2,$c4dims->(0:1),'p')->sever;
 	
-	$size = pdl($hash->{$fc}->dim(0)/2/$opt->{FILTER_HYPERSMOOTHING});
-	$k2d = exp(-$rv2d*$rv2d / $size / $size);
+	my $size = pdl($hash->{$fc}->dim(0)/2/$opt->{FILTER_HYPERSMOOTHING});
+	my $k2d = exp(-$rv2d*$rv2d / $size / $size);
 	
 	$size = $c4->dim(2)/5;
-	$wcoord = xvals($c4->dim(2)) - $c4->dim(2) * (xvals($c4->dim(2))>$c4->dim(2)/2);
+	my $wcoord = xvals($c4->dim(2)) - $c4->dim(2) * (xvals($c4->dim(2))>$c4->dim(2)/2);
 	for $i(1..$c4->dim(2)/2) {
 	my $scale =  $k2d * exp(-$wcoord->at($i)*$wcoord->at($i)/$size/$size);
 	$c4->(:,:,$i) *= $scale;
@@ -223,7 +240,7 @@ sub motion_filter {
 	ifftnd($c4,$c4i); 
 	
 	print "Finding minima...";
-	$c4min = $c4->range($of,pdl($hash->{$fc}->dims))->mv(2,0)->minimum;
+	my $c4min = $c4->range($of,pdl($hash->{$fc}->dims))->mv(2,0)->minimum;
 	print "subtracting...\n";
 	$hash->{$fc} -= $c4min;
     }

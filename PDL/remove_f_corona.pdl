@@ -1,19 +1,142 @@
 ## -*-perl-*-
+use strict;
+
 =head2 remove_f_corona - remove the F corona from a sequence of coronagraph/HI images
 
 =for usage
 
  $ret = remove_f_corona( $images , $opt );
 
- $images should be either a hash ref containing the images to be processed as a 3-D PDL in the "RAW_CUBE" field,
- or a list ref of images.  If the RAW_CUBE field is used, the hash should also contain a RAW_HDRS list ref.
+ # $images should be either a hash ref containing the images to be processed as a 3-D PDL in the "RAW_CUBE" field,
+ # or a list ref of images.  If the RAW_CUBE field is used, the hash should also contain a RAW_HDRS list ref.
 
- $opt is an options hash.
+ # $opt is an options hash.
 
- To handle mixed-binning STEREO data, the code (as a special case) 2x2-bins 2048x2048 images down to 1024x1024 by
- default, and leaves 1024x1024 images alone.  To avoid this behavior, set the option 'bin' to 0 or undef.
- 
 =for ref
+
+C<remove_f_corona> is the first step in both the hi-1 and hi-2 pipelines, and therefore it includes the process
+of loading the data into memory.  (It would not be unreasonable to break this first step out in a future version).
+
+If you supply a list ref of images or image names, then the images are regularized and a data processing hash is 
+created.  The images undergo some preprocessing and filtering to reject images that appear to not be part of a 
+regular sequence.  In particular:
+
+=over 3
+
+=item size filtering
+
+If you hand in a list of FITS file names, then the images must exactly
+match the specified image size, or they are skipped.
+
+As a special case, if you hand in pre-loaded images and set the C<bin>
+option flag, then 2048x2048 images are binned down to 1024x1024.
+
+=item rotation filtering
+
+The C<CROTA> field of the header is checked for each image.  If any of
+them deviate by more than a few degrees (determined by the
+C<REJECT_BY_CROTA> option) from the batch average, then those frames
+are rejected.  This filters out roll maneuvers.
+
+=item sum filtering
+
+Each image is summed.  Images whose sum is too different from the
+median for the whole data set (the amount is set by the
+C<REJECT_BY_SUM> option) are rejected.  This gets rid of miscellaneous
+pointing and exposure time irregularities, and does a good job of
+finding the occasional mislabeled image in the STEREO data set
+(e.g. there are some binned COR images in the HI-1 data stream).
+
+=back
+
+The images are also normalized in two important ways:
+
+=item badval cleaning
+
+Bad values in the image are cleaned up.  Bad regions are dilated all around
+(amount set by the BAD_DIL_PIX option) and then filled in with median
+values of their periphery.
+
+=item exposure fluctuation correction
+
+The images are normalized to a constant sum.  This is a big deal because 
+the exposure times given in the headers appear to be accurate only to 
+within a few tenths of a percent, which is not sufficient to stabilize
+the background.  This is done by a call to C<remove_fluctuations()>.
+
+=back
+
+After the initial ingestion and cleaning, the F corona subtraction is
+straightforward: the images are sorted and the specified percentile
+value is used as an F corona model and subtracted.  The F corona model
+can be smoothed if desired.  
+
+The percentile value calculation approximates a more complete noise
+analysis of the data, which would be required to generate a "real" F
+coronal model.  The problem is that a given pixel value contains
+(signal + noise); sampling the minimum value of a long time series for
+a given pixel as is commonly done in coronagraph data, samples both a
+near-minimum value of the signal and also a near-minimum value of the
+noise.  This systematically underestimates the F corona.  Selecting a
+slightly-above-zero percentile offsets this slightly.
+
+The skewed sampling of the noise distribution can be seen as fine
+spatial structure in the resulting F corona model, which tracks the
+motion of stars through the field; and also as a small residual signal
+in the parts of the image where the F corona is brightest.  The effect
+is described by DeForest, Howard & Tappin (2011).  These artifacts
+can be smoothed out with the C<sm> option, which smooths the resulting
+F corona model via median filtering.
+
+Options are:
+
+=over 3
+
+
+=item pct - percentile to use for the f corona
+
+The percentile value to treat as the f corona.  The default 5 is appropriate for
+HI-2A.
+
+=item sm - smooth the f corona model by median filtering
+
+This is a 2-array ref describing how much median smoothing should be
+applied to the background.  The default [7,30] is appropriate for
+HI-2A.
+
+=item bin - don't use
+
+C<bin> is left in for historical reasons but is neither needed nor
+helpful in normal use.
+
+=item neg - specify negative-value handling
+
+Controls how negative values should be handled on input.  Valid values
+are C<bad>, C<max>, C<zero>, or C<mask>.  The default C<bad> should normally
+be used.
+
+=item MARK_BAD - flag to cause certain points to be marked bad
+
+=item MASK_THRESH - threshold value for badness
+
+Points with values higher than MASK_THRESH are marked BAD if the MARK_BAD flag is set.
+
+=item MASK_RADIUS - circular masking
+
+This is useful for HI-2 data.  Points outside the specified radius are marked bad. Set
+this to 0 to disable it.
+
+=item IMG_SIZE - require an image dimension
+
+Images whose height or width is different from IMG_SIZE are rejected.
+
+=item 
+
+FIXME
+
+=back
+
+
 
 =cut
 
@@ -22,7 +145,9 @@ use PDL::Transform;
 use PDL::Bad;
 sub  remove_f_corona {
      local($PDL::BIGPDL) = 1;
-     
+     my $VERSION = "2.0 5-May-2013";
+     my $i;
+
      # Read parameters
      my $in = shift;
      my $opt = shift;
@@ -45,7 +170,7 @@ sub  remove_f_corona {
 
      print cards($opt);
      # Make sure we have a data cube in usable form
-     my $ims, $hdrs;
+     my ($ims, $hdrs);
      if(ref $in eq 'HASH') {
 	 if(defined($in->{'RAW_CUBE'}) && defined($in->{'RAW_HDRS'}) ) {
 	     $ims = $in->{'RAW_CUBE'};
@@ -92,7 +217,7 @@ sub  remove_f_corona {
 			 
 		     }
 		 }
-	     }
+	     } # end of 'bin' special case
 	 } else {
 	     # Handle case where an array of FITS file names is entered
 	     my @cube;
@@ -232,6 +357,7 @@ sub  remove_f_corona {
      }
 	 
      if($opt->{MARK_BAD}) {
+	 print "marking bad points...\n";
 	 for $i(0..$out->{BKSUB_CUBE}->dim(2)-1) {
 	     my $m = 1;
 	     if($opt->{MASK_THRESH}) {
@@ -246,6 +372,13 @@ sub  remove_f_corona {
 	     $out->{BKSUB_CUBE}->where($ims>10000) .= 10000;
 	 }
      }
+
+     unless(exists($out->{log})) {
+	 $out->{log} = [];
+     }
+
+     push(@{$out->{log}},"  remove_f_corona v$VERSION");
+
      print "returning from remove_f_corona...\n";     
      return $out;
 }
