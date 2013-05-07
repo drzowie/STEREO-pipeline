@@ -75,6 +75,7 @@ use PDL::NiceSlice;
 sub motion_filter {
     my $hash = shift;
     my $opt = shift;
+    my $VERSION = "2.0 5-May-2013";
 
     my $i;
     
@@ -246,6 +247,8 @@ sub motion_filter {
     }
 
     $hash->{$fc} = $hash->{$fc}->setbadif($hash->{$fm}==0);
+
+    push(@{$hash->{log}},"  motion_filter v$VERSION");
 
     print "returning from motion_filter...\n";
     return $hash;

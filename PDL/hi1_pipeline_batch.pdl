@@ -1,3 +1,6 @@
+#-*-perl-*-
+use strict;
+
 =head2 hi1_pipeline_batch 
 
 =for usage
@@ -50,6 +53,9 @@ use PDL::IO::Dumper;
 sub hi1_pipeline_batch {
     my $batchno = shift;
     my $opt = shift // {};
+    my $k;
+    my $i;
+    my $fc;
 
     # Force particular options
     $opt->{BATCHLENGTH} = 7;   # days
