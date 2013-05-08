@@ -38,10 +38,15 @@ sub clean_baddies {
     my $i = 0;
 
     do {
+	$i++;
 	print "iteration $i ";
 	$badplaces = whichND($cube->isbad);
-	
-	die "clean_baddies: too many bad values!" if ($badplaces->dim(1) > $cube->nelem / 10);
+	unless($badplaces->nelem) {
+	    print "no bad values! Done!\n";
+	    return $cube;
+	}
+
+	die "clean_baddies: too many bad values!" if ($badplaces->dim(1) > $cube->nelem / 5);
 	die "clean_baddies: Not enough progress, I quit (1% required)" if($badplaces->dim(1) / $last_bad > 0.99);
 
 	print "(".$badplaces->dim(1).")...";
