@@ -156,8 +156,9 @@ sub motion_filter {
 
     print "FFT...";
 
-    fftnd($c3,$c3i);
-
+    fft($c3,$c3i);
+    fft($c3->mv(1,0),$c3i->mv(1,0));
+    fft($c3->mv(2,0),$c3i->mv(2,0));
 
     print "filtering...";
 
@@ -206,13 +207,13 @@ sub motion_filter {
 
 #  ($c3, $c3i) = spawn_fft($c3,$c3i,1);
 
-    ifftnd($c3,$c3i);
+    ifft($c3->mv(2,0),$c3i->mv(2,0));
+    ifft($c3->mv(1,0),$c3i->mv(1,0));
+    ifft($c3,$c3i);
 
     undef $c3i;
     $hash->{$fc} .= $c3->range( $of, pdl( $hash->{$fc}->dims ) )->sever;
     undef $c3;
-
-
 
     ##############################
     # Generate hypersmoothed data as a background.  
@@ -238,7 +239,9 @@ sub motion_filter {
 	print "inverse FFT (smooth)...";
 	
 #    ($c4, $c4i) = spawn_fft($c4,$c4i,1)
-	ifftnd($c4,$c4i); 
+	ifft($c4->mv(2,0), $c4i->mv(2,0));
+	ifft($c4->mv(1,0), $c4i->mv(1,0));
+	ifft($c4, $c4i);
 	
 	print "Finding minima...";
 	my $c4min = $c4->range($of,pdl($hash->{$fc}->dims))->mv(2,0)->minimum;
