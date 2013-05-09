@@ -45,7 +45,7 @@ sub hi1_pipeline {
 	DIST_CORR_PSIZE         => 35,      # 35 pixel radius patch size for final correlation
 	DIST_GUESS_DRIFTRATE    => 260/5,   # Initial guess is 260 pixels in 5 days
 
-	NULL_MIN_PCT		=> 5,      # Null stars to the 5th percentile
+	NULL_MIN_PCT		=> 3,      # Null stars to the 5th percentile
 	NULL_SMOOTH_SIZE	=> [3,3],  # Smooth 3x3 pixels with a median filter.
 	NULL_SMOOTH_FRAMES      => 1,      # Actually do the smoothing
 	NULL_UNSHARP_FILTER     => 6,      # Radius for the unsharp-filter mask used to find residual spikes
@@ -65,7 +65,7 @@ sub hi1_pipeline {
 	FILTER_DIL_SIZE         => 3,      # Dilate bad values +/- this many pixels
 	FILTER_SLOP             => 0.5,    # Very smooth motion filter cutoff to minimize ringing
 	FILTER_CUTOFF_PPF       => 1,      # Anything slower than one pixel per frame gets nixed
-	FILTER_HYPERSMOOTHING   => 1,      # Hypersmooth the background
+	FILTER_HYPERSMOOTHING   => 0,      # Hypersmooth the background
 	FILTER_REMOVE_FIXED     => 0,      # Don't remove the fixed component
 	FILTER_ZAP_HF           => 0,      # Don't truncate the high wavevector corners of the Brillouin zone
 
