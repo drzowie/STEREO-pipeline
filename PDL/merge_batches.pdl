@@ -112,7 +112,7 @@ sub merge_batches {
 		    # Expand the badmask so we can feather it later
 		    for $i(0..$badmask->dim(0)-1) {
 			print ",";
-			$badmask->(($i)) .= $badmask->(($i))->convolveND(ones($ksiz*1.1,$ksiz*1.1),{method=>'direct'});
+			$badmask->(($i)) .= $badmask->(($i))->convolveND(rvals($ksiz,$ksiz)<=$opt->{MARGIN},{method=>'direct'});
 		    }
 		    $mask= ($badmask==0)->float;
 
