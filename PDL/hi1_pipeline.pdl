@@ -65,7 +65,7 @@ sub hi1_pipeline {
 	FILTER_DIL_SIZE         => 3,      # Dilate bad values +/- this many pixels
 	FILTER_SLOP             => 0.5,    # Very smooth motion filter cutoff to minimize ringing
 	FILTER_CUTOFF_PPF       => 1,      # Anything slower than one pixel per frame gets nixed
-	FILTER_HYPERSMOOTHING   => 20,     # Hypersmooth the background
+	FILTER_HYPERSMOOTHING   => 15,     # Hypersmooth the background
 	FILTER_REMOVE_FIXED     => 0,      # Don't remove the fixed component
 	FILTER_ZAP_HF           => 0,      # Don't truncate the high wavevector corners of the Brillouin zone
 
