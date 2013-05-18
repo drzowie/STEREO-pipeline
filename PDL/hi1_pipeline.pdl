@@ -45,7 +45,7 @@ sub hi1_pipeline {
 	DIST_CORR_PSIZE         => 35,      # 35 pixel radius patch size for final correlation
 	DIST_GUESS_DRIFTRATE    => 260/5,   # Initial guess is 260 pixels in 5 days
 
-	NULL_MIN_PCT		=> 3,      # Null stars to the 5th percentile
+	NULL_MIN_PCT		=> 1,      # Null stars to the 3rd percentile
 	NULL_SMOOTH_SIZE	=> [3,3],  # Smooth 3x3 pixels with a median filter.
 	NULL_SMOOTH_FRAMES      => 1,      # Actually do the smoothing
 	NULL_UNSHARP_FILTER     => 6,      # Radius for the unsharp-filter mask used to find residual spikes

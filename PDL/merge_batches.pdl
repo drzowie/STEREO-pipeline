@@ -18,7 +18,7 @@ sub merge_batches {
     $opt = {} unless defined($opt);
     $opt->{MERGED_DIR} = "L2" unless(defined $opt->{MERGED_DIR});
     $opt->{PROCESSES} = 8 unless(defined $opt->{PROCESSES});
-    $opt->{MARGIN} = 20 unless(defined $opt->{MARGIN});    
+    $opt->{MARGIN} = 40 unless(defined $opt->{MARGIN});    
     $opt->{START} = 0 unless(defined $opt->{START});
     $opt->{REGEXP} = 'clean\-(.*)\-\-BATCH.*' unless(defined $opt->{REGEXP});
 
