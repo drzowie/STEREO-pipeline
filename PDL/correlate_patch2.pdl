@@ -59,10 +59,11 @@ sub correlate_patch2 {
     $reg1->inplace->setbadtoval(0);
 
     our $crosscorr = $reg0->(-1:0:-1,-1:0:-1)->convolveND($reg1,{bound=>'t'});
-    my $maxloc = whichND($crosscorr == $crosscorr->max)->(:,(0));
+    my $maxloc = whichND($crosscorr == $crosscorr->max);
 
     my $prelim_of;
     if($maxloc->nelem) {
+	$maxloc = $maxloc->(:,(0));
         $prelim_of = $maxloc - $bigsized/2 + $of0;
     } else {
 	$prelim_of = pdl(0,0);
@@ -84,7 +85,9 @@ sub correlate_patch2 {
 
     $crosscorr = $reg0->(-1:0:-1,-1:0:-1)->convolveND($reg1,{bound=>'t'});
 
-    $maxloc = whichND($crosscorr==$crosscorr->max)->(:,(0));
+    $maxloc = whichND($crosscorr==$crosscorr->max);
+    if($maxloc->nelem){$maxloc = $maxloc->(:,(0));} 
+    else { return asin(pdl(1.1,1.1)); }
 
     my $pix_of = $prelim_of + $maxloc - $patchd/2;
     
@@ -98,7 +101,9 @@ sub correlate_patch2 {
     $reg1->inplace->setbadtoval(0);
     
     $crosscorr = $reg0->(-1:0:-1,-1:0:-1)->convolveND($reg1,{bound=>'t'});
-    $maxloc = whichND($crosscorr==$crosscorr->max)->(:,(0));
+    $maxloc = whichND($crosscorr==$crosscorr->max);
+    if($maxloc->nelem){$maxloc=$maxloc->(:,(0));} 
+    else { return asin(pdl(1.1,1.1)); }
 
     my $final_pix_of = $pix_of + $maxloc - $patchd/2;
 

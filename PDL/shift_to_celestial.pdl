@@ -53,7 +53,7 @@ sub shift_to_celestial {
     my $hash = shift;
     my $opt = shift;
 
-    my $VERSION = "2.0 5-May-2013";
+    my $VERSION = "2.1 21-May-2013";
 
     $opt = {} unless(defined $opt);
     $opt->{'ALIGN_DEJITTER'} = 1    unless(defined $opt->{'ALIGN_DEJITTER'});
