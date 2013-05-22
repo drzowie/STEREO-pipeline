@@ -1,0 +1,366 @@
+=head2 read_files - read in a collection of files, to start processing as a batch
+
+=for usage
+
+     $h = read_files(\@f,$opt);
+
+=for ref
+
+C<read_files> makes the initial ingestion of a batch of files into the
+STEREO pipeline.  
+
+Several preprocessing steps are carried out:
+
+=over 3
+
+=item size filtering
+
+If you hand in a list of FITS file names, then the images must exactly
+match the specified image size, or they are skipped.
+
+As a special case, if you hand in pre-loaded images and set the C<bin>
+option flag, then 2048x2048 images are binned down to 1024x1024.
+
+=item rotation filtering
+
+The C<CROTA> field of the header is checked for each image.  If any of
+them deviate by more than a few degrees (determined by the
+C<REJECT_BY_CROTA> option) from the batch average, then those frames
+are rejected.  This filters out roll maneuvers.
+
+=item sum filtering
+
+Each image is summed.  Images whose sum is too different from the
+median for the whole data set (the amount is set by the
+C<REJECT_BY_SUM> option) are rejected.  This gets rid of miscellaneous
+pointing and exposure time irregularities, and does a good job of
+finding the occasional mislabeled image in the STEREO data set
+(e.g. there are some binned COR images in the HI-1 data stream).
+
+=item Bad-patch filtering
+
+Many STEREO images are damaged by erroneous processing on board.  Each image
+is the sum of many individual camera frames, and sometimes a portion of 
+an image is damaged by either being substituted with a different type of
+image or filled with a fill pattern.  These images are not notated in the 
+metadata.  Many of them (e.g. the HI-1A image on 10:01 at 2007-05-02) are
+not notated in the official bad-image list.  These images can be detected
+by finding discrepant parts of the image.  
+
+Bad-patch filtering is done by (a) finding a median image for the whole 
+batch, and then 2D median filtering this temporal median; then (b) comparing
+the 2D median filtered version of each frame to the master median.  Pixels
+that differ by more than a set relative threshold (e.g. 5%) are counted. If
+more than a set fraction of all pixels in the image (e.g. 10% of pixels) exceed
+this threshold, the image is treated as bad and ignored.
+
+=back
+
+The images are also normalized in two important ways:
+
+=item badval cleaning
+
+Bad values in the image are cleaned up.  Bad regions are dilated all around
+(amount set by the BAD_DIL_PIX option) and then filled in with median
+values of their periphery.
+
+=item exposure fluctuation correction
+
+The images are normalized to a constant sum.  This is a big deal because 
+the exposure times given in the headers appear to be accurate only to 
+within a few tenths of a percent, which is not sufficient to stabilize
+the background.  This is done by a call to C<remove_fluctuations()>.
+
+=back
+
+Options accepted are:
+
+=item neg - specify negative-value handling
+
+Controls how negative values should be handled on input.  Valid values
+are C<bad>, C<max>, C<zero>, or C<mask>.  The default C<bad> should normally
+be used.
+
+=item MARK_BAD - flag to cause certain points to be marked bad
+
+=item MASK_THRESH - threshold value for badness
+
+Points with values higher than MASK_THRESH are marked BAD if the MARK_BAD flag is set.
+
+=item MASK_RADIUS - circular masking
+
+This is useful for HI-2 data.  Points outside the specified radius are marked bad. Set
+this to 0 to disable it.
+
+=item IMG_SIZE - require an image dimension
+
+Images whose height or width is different from IMG_SIZE are rejected.
+
+=item 
+
+FIXME
+
+=back
+
+=cut
+
+$PDL::BIGPDL = 1;
+use PDL::NiceSlice;
+use strict;
+
+sub read_files {
+    my $VERSION = "2.2 18-May-2013";
+    
+    my $in = shift;
+    my $opt = shift // {};
+
+    my $defaults = {
+	neg=>'bad',
+	MASK_THRESH => 500,
+	MASK_RADIUS => 0,
+	MARK_BAD    => 1,
+	IMG_SIZE    => 1024,
+	REJECT_BY_SUM => 0.03,
+	REJECT_BY_CROTA => 2,
+	REJECT_BY_PATCH => [5, 0.05, 0.05], # [median size, rel. trigger, rel. amount for bad image]
+	REJECT_LIST_FNAME=> "./rejected.txt",
+	CLEAN_BAD => 1,
+	BAD_DIL_PIX => 1,
+	BAD_DIL_FR => 0
+    };
+
+    for my $k(keys %$defaults){
+	$opt->{$k} = $defaults->{$k} unless(exists($opt->{$k}));
+    }
+
+    print cards($opt);
+    my @ff;
+    my $i;
+
+     my ($ims, $hdrs);
+     if(ref $in eq 'HASH') {
+	 if(defined($in->{'RAW_CUBE'}) && defined($in->{'RAW_HDRS'}) ) {
+	     $ims = $in->{'RAW_CUBE'};
+	 } else {
+	     die "read_files: input hash needs both RAW_CUBE and RAW_HDRS fields\n";
+	 }
+     } elsif( ref $in eq 'ARRAY') {
+
+	 # Handle case where an array of FITS files is entered
+	 if( ref $in->[0] eq 'PDL' ) {
+	     # prefrobnicate 2048x2048 images down to 1024x1024
+	     if($opt->{'bin'}) {
+		 my $ndc = ndcoords(1024,1024);
+		 
+		 for $i(0..$#$in) {
+		     if( $in->[$i]->dim(0) == 2048 &&
+			 $in->[$i]->dim(1) == 2048
+			 ) {
+			 # Explicit binning
+			 
+			 # Sum over quads of pixels (2x2 binning).  The first 
+			 # (commented out) case doesnt' work, apparently due to a problem
+			 # with the binning in the STEREO pipeline.
+			 my $im2;
+			 
+			 $im2 = (   $in->[$i]->(0:-2:2,0:-2:2) 
+				    + $in->[$i]->(1:-1:2,0:-2:2)
+				    + $in->[$i]->(0:-2:2,1:-1:2)
+				    + $in->[$i]->(1:-1:2,1:-1:2)
+			     ) / 4;
+			 print "i=$i; 2048x2048 -> 1024x1024 (/4)\n";
+			 
+			 # Patch up header in the binned image
+			 $im2->sethdr($in->[$i]->hdr_copy);
+			 
+			 # CRPIX is off-by-one.  The -0.5 moves the origin to the lower-left corner of the 
+			 # lower-left pixel, and the +0.5 moves it back to the center of the lower-left pixel.
+			 $im2->hdr->{CRPIX1} = ($in->[$i]->hdr->{CRPIX1}-0.5)/2 + 0.5; 
+			 $im2->hdr->{CRPIX2} = ($in->[$i]->hdr->{CRPIX2}-0.5)/2  +0.5;
+			 $im2->hdr->{CDELT1} *= 2;
+			 $im2->hdr->{CDELT2} *= 2;
+			 
+			 $in->[$i] = $im2;
+			 
+		     }
+		 }
+	     } # end of 'bin' special case
+	 } else {
+	     # Handle case where an array of FITS file names is entered
+	     my @cube;
+	     for my $fname(@$in) {
+		 my $im = float rfits($fname,{hdrcpy=>1});
+		 if($im->dim(0) != $opt->{IMG_SIZE} || $im->dim(1) != $opt->{IMG_SIZE}) {
+		     print "File $fname isn't $opt->{IMG_SIZE}x$opt->{IMG_SIZE}.  Skipping.\n";
+		 } else {
+		     push @cube, $im;
+		 }
+	     }
+	     @ff = @$in;
+	     $in = \@cube;
+	 }
+	 $ims = pdl(float, @{$in});
+	 $in = {
+	     RAW_CUBE => $ims,
+	     RAW_HDRS => [ map { $_->hdr } @$in ],
+	 };
+     } else {
+	 die "read_files: need a hash ref or an array ref as first argument\n";
+     }
+
+#     $ims = $ims->setbadif(!isfinite($ims));
+
+     ##############################
+     # Handle negative values - BAD or maxval
+     if($opt->{'neg'} eq 'bad') {
+	 $ims = $ims->setbadif($ims<0);
+     } elsif($opt->{'neg'} eq 'max') {
+	 $ims->where($ims<0) .= $ims->max;
+     } elsif($opt->{'neg'} eq 'zero') {
+	 $ims->where($ims<0) .= 0;
+     } elsif($opt->{'neg'} eq 'mask') {
+	 $ims->where($ims<0) .= $ims->max + 10000;
+     } else {
+	 die("read_files: neg option must be 'bad' or 'max'\n");
+     }
+    
+    ##############################
+    # Clean bad values if asked for and needed
+    if($opt->{'CLEAN_BAD'}){
+	my $badloc = whichND($ims->isbad);
+	if($badloc->nelem){
+	    print "Found ".$badloc->nelem." bad locations.  Dilating with radius=$opt->{BAD_DIL_PIX} pixels, $opt->{BAD_DIL_FR} frames";
+	    for my $i (-$opt->{BAD_DIL_PIX}..$opt->{BAD_DIL_PIX}) {
+		for my $j(-$opt->{BAD_DIL_PIX}..$opt->{BAD_DIL_PIX}) {
+		    next if($i*$i + $j*$j  >  $opt->{BAD_DIL_PIX} * $opt->{BAD_DIL_PIX});
+		    for my $fr(-$opt->{BAD_DIL_FR} .. $opt->{BAD_DIL_FR}) {
+			p "($i,$j,$fr)\t";
+			$ims->indexND($badloc + pdl($i,$j,$fr), 'e') .= $ims->badvalue;
+			print ".";
+		    }
+		}
+	    }
+	    print "\nNow there are ".($ims->isbad->sum)." bad values.  Cleaning up...";
+	    clean_baddies($ims, 2);
+	}
+    }
+    
+    ##############################
+    # Deal with rejecting rotated files...
+    if($opt->{'REJECT_BY_CROTA'}) {
+	my $crota = pdl( map { $_->{CROTA}} @{$in->{RAW_HDRS}} );
+	my $cm = $crota->median;
+	my $mask = ( ( $crota <= $cm + $opt->{'REJECT_BY_CROTA'} ) & 
+		     ( $crota >= $cm - $opt->{'REJECT_BY_CROTA'} ) );
+	if($mask->sum < $mask->nelem) {
+	    print "Rejecting frames for CROTA: ".((!$mask)->which)."\n";
+	    open FOO,">>".$opt->{REJECT_LIST_FNAME};
+	    for my $fn((!$mask)->which) {
+		printf FOO "CROTA\t%s\t%s\n",$in->{RAW_HDRS}->[$fn]->{filename},$ff[$fn];
+	    }
+	    close FOO;
+	    my $goodies = $mask->which;
+	    $ims = $ims->(:,:,$goodies)->sever;
+	    $in->{RAW_CUBE} = $ims;
+	    $in->{RAW_HDRS} = [ @{$in->{RAW_HDRS}}[$goodies->list] ];
+	    @ff = @ff[$goodies->list];
+	}
+    }
+    
+    ##############################
+    # Deal with rejecting bad files...
+    if($opt->{'REJECT_BY_SUM'}) {
+	my $sums = $ims->sumover->sumover;
+	my $median = $sums->median;
+	my $medlo = $median / (1 + $opt->{'REJECT_BY_SUM'});
+	my $medhi = $median * (1 + $opt->{'REJECT_BY_SUM'});
+	
+	my @baddies = (($sums > $medhi) | ($sums < $medlo))->which->list;
+	
+	if(@baddies) {
+	    print "read_files: Rejecting frames ".join(",",@baddies)."\n";
+	    open FOO, ">>".$opt->{REJECT_LIST_FNAME};
+	    for my $fn(@baddies) {
+		printf FOO "SUM\t%s\t%s\n",$in->{RAW_HDRS}->[$fn]->{filename},$ff[$fn];
+	    }
+	    close FOO;
+	    my $goodies = (($sums <= $medhi) & ($sums >= $medlo))->which;
+	    $ims = $ims->(:,:,$goodies)->sever;
+	    $in->{RAW_CUBE} = $ims;
+	    $in->{RAW_HDRS} = [ @{$in->{RAW_HDRS}}[$goodies->list] ];
+	    @ff = @ff[$goodies->list];
+	}
+    }
+
+    ##############################
+    # Deal with rejecting files with bad patches in them
+    if($opt->{'REJECT_BY_PATCH'}) {
+    	my $median = $ims->mv(2,0)->medover;
+	print "Rejecting by patches: ";
+	my( $size, $thresh, $amt ) = @{$opt->{'REJECT_BY_PATCH'}};
+	my $kk = ones($size,$size);
+	print "size is $size; thresh is $thresh; amt is $amt\n";
+	my @baddies = ();
+	for my $i(0..$ims->dim(2)-1) {
+	    my $im = $ims->(:,:,($i))->med2d($kk);
+	    my $n = ((($im - $median)/$median)->abs > $thresh)->sum;
+	    my $bad = (($n/$im->nelem) > $amt);
+	    print "$i:".($bad?"B":"g")." ";
+	    push(@baddies,$i) if( $bad );
+	}
+	print "\n";
+	if(@baddies) {
+	    print "read_files: Rejecting frames ".join(",",@baddies)."\n";
+	    open FOO,">>".$opt->{REJECT_LIST_FNAME};
+	    for my $fn(@baddies) {
+		printf FOO "PATCH\t%s\t%s\n",$in->{RAW_HDRS}->[$fn]->{filename},$ff[$fn];
+	    }
+	    close FOO;
+	    my $goodmask = ones($ims->dim(2));
+	    $goodmask->(pdl(@baddies)) .= 0;
+	    my $goodies = which($goodmask);
+	    $ims = $ims->(:,:,which($goodmask))->sever;
+	    $in->{RAW_CUBE} = $ims;
+	    $in->{RAW_HDRS} = [ @{$in->{RAW_HDRS}}[$goodies->list] ];
+	    @ff= @ff[$goodies->list];
+	}
+    }
+
+    my $out = $in;
+    
+    if($opt->{'REMOVE_FLUCTUATIONS'}) {
+	remove_fluctuations($ims,$opt);
+    }
+    
+    my $rvm = pdl(1);
+
+    if($opt->{MASK_RADIUS}) {
+	$rvm = ( rvals($out->{RAW_CUBE}->(:,:,(0))) < $opt->{MASK_RADIUS} )->byte;
+    }
+
+     print "Making badval masks...\n";
+     $out->{MASK_CUBE} = ones(byte, $out->{RAW_CUBE}->dims);
+
+	 
+     if($opt->{MARK_BAD}) {
+	 print "marking bad points...\n";
+	 for $i(0..$out->{RAW_CUBE}->dim(2)-1) {
+	     my $m = 1;
+	     if($opt->{MASK_THRESH}) {
+		 $m = ($out->{RAW_CUBE}->(:,:,($i))->med2d(ones(3,3)) <= $opt->{MASK_THRESH})->convolveND(ones(3,3)/9);
+	     }
+	     $out->{MASK_CUBE}->(:,:,($i)) .= ($rvm * $m) > 0.999 ;
+	     print "$i ";
+	 }
+	 print "\n";
+	 
+	 if($opt->{'neg'} eq 'mask') {
+	     $out->{RAW_CUBE}->where($ims>10000) .= 10000;
+	 }
+     }
+
+
+    return $out;
+
+}
+

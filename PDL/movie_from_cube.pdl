@@ -1,0 +1,92 @@
+=head2 movie_from_cube - render frames from a data cube
+
+=for ref
+
+options:
+
+=over 3
+
+=item fname - SPRINTF format string for file names.  First argument is file number (e.g. "frame-%4.4d.png" is good)
+
+=item popt - plot options for gnuplot, as a hash ref
+
+=item topt - gnuplot terminal options, as a hash ref
+
+=item term - gnuplot terminal type (defaults to "png")
+
+=item cores - defaults to 4; if 0, no multitasking.
+
+=back
+
+=cut
+
+use strict;
+
+sub movie_from_cube {
+    my $cube = shift;
+    my $opt = shift;
+
+    my $defaults = {
+	fname   =>  "frame-%4.4d.png",
+	title   =>  undef,
+	term    =>  "png",
+	topt    => {size=>[8,8],enhanced=>1},
+	popt    => {clut=>'sepia',j=>1,globalwith=>'image'},
+	cores   => 4
+    };
+    for my $k(keys %$defaults) {
+	unless(ref $defaults->{$k} eq 'HASH') {
+	    unless( exists( $opt->{$k} ) ) {
+		$opt->{$k} = $defaults->{$k};
+	    }
+	} else {
+	    # Hash field - do keywise defaulting
+	    unless( exists( $opt->{$k} ) ) {
+		$opt->{$k} = {};
+	    }
+	    for my $kk(keys %{$defaults->{$k}}) {
+		unless( exists( $opt->{$k}->{$kk} ) ) {
+		    $opt->{$k}->{$kk} = $defaults->{$k}->{$kk};
+		}
+	    }
+	}
+    }
+    
+    my $sub = sub {
+	my $i = $_[0];
+	my %topt = %{$opt->{topt}};
+	$topt{output} = sprintf($opt->{fname},$i);
+
+	my $title;
+	if(defined($opt->{title})) {
+	    if((ref($opt->{title})) =~ m/ARRAY/ ) {
+		$title = $opt->{title}->[$i];
+	    } else {
+		$title = $opt->{title}. " (Frame $i) "
+	    }
+	} else {
+	    $title = $opt->{popt}->{title} // "";
+	    $title .= " (Frame $i) ";
+	}
+	
+	my %popt = %{$opt->{popt}};
+	$popt{title} = $title;
+
+	my $w = gpwin( $opt->{term}, %topt );
+	$w->options( %popt );
+	$w->plot($cube->mv(-1,0)->(($i)));
+	$w->close;
+	print "$i ";
+    };
+
+    if( $opt->{cores} ) {
+	multicore([0..$cube->mv(-1,0)->dim(0)-1],  $sub,  $opt->{cores});
+    } else {
+	for my $i(0..$cube->mv(-1,0)->dim(0)-1) {
+	    &$sub($i);
+	    print "$i ";
+	}
+    }
+}
+	
+	

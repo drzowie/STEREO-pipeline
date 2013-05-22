@@ -10,8 +10,77 @@ use strict;
 =for ref
 
 Accepts a list of FITS files, generates a collection of FITS files in a specified output
-directory.
+directory.  This is the central logic to process a single batch of FITS files.  For true pipeline
+use you need to run several staggered batches and then merge the output with C<merge_batches>.
+If you want to run a specific predefined STEREO/HI batch, use hi1_pipeline_batch, which accepts a 
+batch number and searches for the appropriate files in the L1 data store on your system.
 
+If you specify no options at all, a reasonable set of defaults are applied.  All of the subfilters
+accept options that are passed-through in the options hash.  See the documentation for the individual 
+filters for their options.
+
+Options accepted and acted on by hi1_pipeline itself are:
+
+=over 3
+
+=item OUTPUT_DIR (default 'processed') - the name of the directory where processed files should go
+
+=item OUTPUT_FILES (default 1) - a flag: whether to generate output files
+
+=item KEEP_DATA (default 0) - a flag: whether intermediate data sets should be retained in the working hash
+
+=item KEEP_NULLED (default 1) - a flag: whether to keep (and save) NULLED data as well as fully processed.
+
+=back
+
+The steps applied are:
+
+=over 3
+
+=item C<read_files>
+
+This creates the working hash data structure and reads in the files from the file list, filtering out suspicious
+ones.
+
+=item C<remove_f_corona>
+
+This, er, removes F corona (specifically, a baseline minimum value)
+from the images
+
+=item C<get_distortion_params2>
+
+This extracts the distortion function from the starfield
+
+=item C<shift_to_celestial>
+
+This shifts the images to celestial coordinates, including dejittering.
+
+=item C<null_stars>
+
+This attempts to null out the starfield using the minimum value in the
+celestial plane
+
+=item C<clean_telegraph>
+
+This removes residual starfield effects that are due to nonlinearities
+in the HI detector; these yield slight flickering in the remaining stars.
+
+=item C<motion_filter>
+
+This removes residual second-order artifacts from the F corona process and
+starfield nulling.
+
+=item C<null_stars> (2nd iteration)
+
+This is re-establishes the same minimum scheme as for before the
+motion filtering.
+
+=item C<shift_to_instrument>
+
+Resamples back to instrument coordinates.  The jitter correction from 
+earlier is not reapplied.
+
+=back
 
 =cut
 $PDL::BIGPDL = 1;
@@ -20,7 +89,7 @@ use Date::Format;
 sub hi1_pipeline {
     my $in_list = shift;
     my $opt = shift;
-    my $VERSION = "2.0 (5-May-2013)";
+    my $VERSION = "2.1 (21-May-2013)";
     my $i;
 
     my $opt_defaults = {
@@ -45,10 +114,12 @@ sub hi1_pipeline {
 	DIST_CORR_PSIZE         => 35,      # 35 pixel radius patch size for final correlation
 	DIST_GUESS_DRIFTRATE    => 260/5,   # Initial guess is 260 pixels in 5 days
 
-	NULL_MIN_PCT		=> 3,      # Null stars to the 5th percentile
+	NULL_MIN_PCT		=> 1,      # Null stars to the 3rd percentile
 	NULL_SMOOTH_SIZE	=> [3,3],  # Smooth 3x3 pixels with a median filter.
 	NULL_SMOOTH_FRAMES      => 1,      # Actually do the smoothing
 	NULL_UNSHARP_FILTER     => 6,      # Radius for the unsharp-filter mask used to find residual spikes
+	
+	INTERP_METHOD           => 'h',    # Use hanning-window interpolation instead of pure Gaussian.
 
 	ALIGN_DEJITTER          => 1,      # Dejitter by correlating frames during resampling to celestial coords
 
@@ -65,7 +136,7 @@ sub hi1_pipeline {
 	FILTER_DIL_SIZE         => 3,      # Dilate bad values +/- this many pixels
 	FILTER_SLOP             => 0.5,    # Very smooth motion filter cutoff to minimize ringing
 	FILTER_CUTOFF_PPF       => 1,      # Anything slower than one pixel per frame gets nixed
-	FILTER_HYPERSMOOTHING   => 0,      # Hypersmooth the background
+	FILTER_HYPERSMOOTHING   => 15,     # Hypersmooth the background
 	FILTER_REMOVE_FIXED     => 0,      # Don't remove the fixed component
 	FILTER_ZAP_HF           => 0,      # Don't truncate the high wavevector corners of the Brillouin zone
 
@@ -83,19 +154,27 @@ sub hi1_pipeline {
     }
 
     our $hash;
-	
-    $hash = remove_f_corona($in_list, $opt);      # initial f coronal background sub
+
+    ##############################
+    # Read and filter files, and create the working hash.
+    $hash = read_files($in_list,$opt);
+
+    # Remove the F corona
+    remove_f_corona($hash,$opt);
 
     delete $hash->{RAW_CUBE} unless($opt->{KEEP_DATA});
 
+    # Map starfield distortion for the batch
     print "distortion parameters...\n";
     get_distortion_params2($hash, $opt);   # measure stellar drift
 
+    # Resample to celestial coordinates
     print "shift_to_celestial...\n";
     shift_to_celestial($hash, $opt);      # nullify stellar drift
 
     delete $hash->{BKSUB_CUBE} unless($opt->{KEEP_DATA});
 
+    # Null out the starfield
     print "null_stars...\n";
     null_stars($hash, $opt);              # try to cancel out the starfield
 
@@ -110,7 +189,7 @@ sub hi1_pipeline {
 	$hash->{NULLED_CUBE} = $hash->{CLEAN_CUBE};
 	delete $hash->{CLEAN_CUBE};
 	$hash->{NULLED_log} = [@{$hash->{log}}];
-	
+
 	if($opt->{OUTPUT_FILES}) {
 	    `mkdir $opt->{OUTPUT_DIR}-S`;
 	    for $i(0..$hash->{NULLED_CUBE}->dim(2)-1) {
@@ -144,15 +223,23 @@ sub hi1_pipeline {
 	delete $hash->{NULLED_CUBE} unless($opt->{KEEP_DATA});
     }
 
+    ##############################
+    # Attempt to find and remove telegraph pixels (stars/planets)
     print "Clean telegraph...\n";
     clean_telegraph($hash,$opt);
 
+    ##############################
+    # Apply the motion filter
     print "Motion filter...\n"; 
     motion_filter($hash,$opt);
-
+    
+    ##############################
+    # Re-null to establish the zero point
     print "Second null...\n";
     null_stars($hash,$opt);
 
+    ##############################
+    # Shift back to instrument coordinates.
     print "Shift back to instrument...\n";
     shift_to_instrument($hash,$opt);
 
