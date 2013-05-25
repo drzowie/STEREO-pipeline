@@ -15,6 +15,7 @@ sub merge_batch_by_number {
     $opt->{BATCHDIR_TEMPLATE} = "batch-%4.4d" unless(exists($opt->{BATCHDIR_TEMPLATE}));
     $opt->{BATCH_CHECK_COUNT} = 20 unless(exists($opt->{BATCHCOUNT}));
     $opt->{REGEXP} = 'clean\-(.*)\-\-BATCH.*' unless(defined $opt->{REGEXP});
+    $opt->{LIST_ONLY} = 0 unless(exists($opt->{LIST_ONLY}));
 
     my $bd = sprintf($opt->{BATCHDIR_TEMPLATE},$batchno);
     print "bd is $bd\n";
@@ -26,7 +27,7 @@ sub merge_batch_by_number {
     };
 
     # Start the candidate list
-    my %candidates = ();
+    our %candidates = ();
     for my $file( <$bd/*>) {
 	my $s = &$src_part($file);
 	unless($s) {
@@ -59,7 +60,14 @@ sub merge_batch_by_number {
 	push(@{$candidates{$k}}, shift(@{$candidates{$k}}));
     }
     
-    for my $k(sort keys %candidates) {
-	merge_batches($candidates{$k}, $opt);
+    unless($opt->{LIST_ONLY}) {
+#        for my $k(sort keys %candidates) {
+#	    merge_batches($candidates{$k}, $opt);
+#	}
+	merge_batches( [ map { (@{$candidates{$_}} ) } keys %candidates ], $opt);
     }
+    else {
+	return \%candidates;
+    }
+
 }
