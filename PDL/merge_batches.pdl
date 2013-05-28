@@ -9,11 +9,14 @@
 You feed in a collection of file names and an optional options hash, and the files are merged into a single set of FITS files in the destination directory ("merged" by default or set by the option "MERGED_DIR").
 
 =cut
+
+use strict;
 use Date::Format;
 
 sub merge_batches {
     my $files = shift;
     my $opt = shift;
+    my $VERSION = "2.1 28-May-2013";
     
     $opt = {} unless defined($opt);
     $opt->{MERGED_DIR} = "L2" unless(defined $opt->{MERGED_DIR});
@@ -21,6 +24,8 @@ sub merge_batches {
     $opt->{MARGIN} = 40 unless(defined $opt->{MARGIN});    
     $opt->{START} = 0 unless(defined $opt->{START});
     $opt->{REGEXP} = 'clean\-(.*)\-\-BATCH.*' unless(defined $opt->{REGEXP});
+    $opt->{PTYPE} = '' unless(defined($opt->{PTYPE}));  # processing type -- 'S' or 'M'
+    my $ptype = $opt->{PTYPE};
 
     if($opt->{MERGED_DIR}  and  !(-d $opt->{MERGED_DIR})){
 	`mkdir $opt->{MERGED_DIR}`;
@@ -31,13 +36,13 @@ sub merge_batches {
     print "Sorting ".(0+@$files)." files based on name...\n";
 
     for $file(@$files) {
-	$f2 = $file;
+	my $f2 = $file;
 	$f2 =~ s:.*/::;
 	unless($f2 =~ m/$opt->{REGEXP}/) {
 	    print "File $f2 doesn't match -- skipping\n";
 	    next;
 	} 
-	$fdate = $1;
+	my $fdate = $1;
 	print "fdate=$fdate\n";
 	unless(exists($filenames{$fdate})){
 	    $filenames{$fdate} = [];
@@ -50,43 +55,40 @@ sub merge_batches {
 
     my %pids = ();
 
-    if($opt->{RENDER}) {
-	$w=pgwin(dev=>"5/xs",size=>[4,4]);
-	$w->close;
-    }
-
-    @k = sort keys %filenames;
+    my @k = sort keys %filenames;
     print "start is $opt->{START}; k is $#k\n";
-    for $ii($opt->{START}..$#k) {
+    for my $ii($opt->{START}..$#k) {
 
-	$f = $k[$ii];
+	my $f = $k[$ii];
 
 	next unless(@{$filenames{$f}} > 1);
 
     	while( (0 + keys %pids) >= $opt->{PROCESSES} ) {
-	  $pid = wait();
+	  my $pid = wait();
 	  if($pid<0) {
 	      %pids = ();
-	  }
-	  if($opt->{RENDER}){
-	      eval {$a=rfits($pids{$pid});};
-	      if(defined($a)) {
-		  $w=pgwin(dev=>"5/xs");
-		  $w->imag($a,0,0.05);
-		  $w->hold;
-		  $w->text($a->hdr->{'DATE-AVG'},100,100);
-		  $w->close;
-	      }
 	  }
 	  delete $pids{$pid};
 	}
 
 	if((0 + keys %pids) < $opt->{PROCESSES}) {
-	    $pid = fork();
+
+	    my $fh = rfits($filenames{$f}->[0],{DATA=>0});
+	    my $out_fname;
+	    if($fh->{FILENAME}) {
+		$out_fname = $fh->{FILENAME};
+		$out_fname =~ s/_[1b](....\.fts)$/_2$ptype$1/;  # update L1 to L2
+	    } else {
+		$out_fname = "merged-$f.fits";
+	    }
+	    my $mfname = sprintf("%s/%s",($opt->{MERGED_DIR} || "."),$out_fname) ;
+
+	    my $pid = fork();
+
 	    if($pid<0) {
 		die "fork failed\n";
 	    } 
-	    $mfname = sprintf("%s/merged-%s.fits",($opt->{MERGED_DIR} || "."),$f) ;
+
 	    if($pid) {
 		# parent
 		$pids{$pid}=$mfname;
@@ -95,46 +97,53 @@ sub merge_batches {
 		# daughter
 		print "Evalling...\n";
 		eval {
-		    $ksiz = $opt->{MARGIN}*2 + 1;
-		    my $k = (1 + cos(rvals($ksiz,$ksiz)*3.14159/$opt->{MARGIN})) 
-			* (rvals($ksiz,$ksiz)<$opt->{MARGIN});
+		    my $ksiz = $opt->{MARGIN}*2 + 1;
+		    my $k = (1 + cos( (rvals($ksiz,$ksiz)*3.141592653/$opt->{MARGIN})->clip(0,)));
 		    $k /= $k->sum;
 		    
 		    print "$f: ".(0+@{$filenames{$f}})." files...";
-		    @cube = mrfits(@{$filenames{$f}});
+
+		    my @cube = mrfits(@{$filenames{$f}});
 		    my $cube = pdl(@cube)->mv(-1,0)->sever;
 		    my $hdr = $cube[0]->gethdr;
 		    undef @cube;
 		    
-		    $cube->where($cube->isbad) .= -100;
-		    $badmask = (($cube <-1)->short | (!($cube->isfinite))->short);
+		    my $baddies = !($cube->isfinite->short);  # actual baddies
+		    $cube->where($baddies) .= 0;  	      # Mask out the bad values in the original cube so they don't cause trouble later
 
-		    # Expand the badmask so we can feather it later
-		    for $i(0..$badmask->dim(0)-1) {
+		    my $badmask = $baddies->copy;             # becomes a dilated mask
+
+		    # dilate the badmask
+		    for my $i(0..$badmask->dim(0)-1) {
 			print ",";
-			$badmask->(($i)) .= $badmask->(($i))->convolveND(ones($ksiz*1.1,$ksiz*1.1),{method=>'direct'});
+			$badmask->(($i)) .= $badmask->(($i))->convolveND(ones($opt->{MARGIN}+2,$opt->{MARGIN}+2),{method=>'direct'});
 		    }
-		    $mask= ($badmask==0)->float;
 
-		    for $i(0..$mask->dim(0)-1) {
-			print ".";
-			$mask->(($i)) .= $mask->(($i))->convolveND($k);
+		    # Generate the feathering screen.  Start with 1 for good, 0 for bad.
+		    my $weight = (!$baddies)->float;
+
+		    # Convolve the weight for smooth transition
+		    for my $i(0..$weight->dim(0)-1) {
+		    	print ".";
+			$weight->(($i)) .= $weight->(($i))->convolveND($k,{method=>'direct'});
 		    }
-		    
-		    $avg = ($cube*$mask)->sumover / $mask->sumover;
+
+		    my $avg = ($cube*$weight)->sumover / $weight->sumover;
 		    
 		    ##############################
 		    # Add new header fields
 		    $hdr->{COMMENT} .= "Background model removed; some stars and artifacts may remain\n";
+		    $hdr->{HISTORY} .= "Merged batches with merge_batch $VERSION\n";
 		    $hdr->{HISTORY} .= "Removed background model (SwRI pipeline; PDL) CED\n   (Some artifacts may remain)";
+		    $hdr->{ORIGIN}  = 'SwRI (contact: deforest@boulder.swri.edu) / Post-processed at SwRI';
 
 		    $hdr->{DATE} = time2str("%Y-%m-%dT%H:%M:%S",time,'Z');
-		    $hdr->{FILENAME} =~ s/_1(....\.fts)$/_2$1/;  # update L1 to L2
+		    my $ptype = $opt->{PTYPE};
+		    $hdr->{FILENAME} = $out_fname;
 
 		    $avg->sethdr($hdr);
-		    $fname = sprintf("%s/%s",($opt->{MERGED_DIR} || "."),$hdr->{FILENAME});
-		    print "writing $fname\n";
-		    wfits( $avg, $fname);
+		    print "writing $mfname\n";
+		    wfits( $avg, $mfname);
 		};
 		if($@){
 			print STDERR "daughter: $@\n";
@@ -146,7 +155,7 @@ sub merge_batches {
 	}
     }
     while(keys %pids) {
-	$p = wait();
+	my $p = wait();
 	return unless(defined($p) and $p>0);
 	delete $pids{$p};
     }
