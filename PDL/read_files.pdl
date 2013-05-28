@@ -98,7 +98,6 @@ Images whose height or width is different from IMG_SIZE are rejected.
 
 =item 
 
-FIXME
 
 =back
 
@@ -106,14 +105,15 @@ FIXME
 
 $PDL::BIGPDL = 1;
 use PDL::NiceSlice;
+
 use strict;
 
+
 sub read_files {
-    my $VERSION = "2.2 18-May-2013";
+    my $VERSION = "2.3 22-May-2013";
     
     my $in = shift;
     my $opt = shift // {};
-
     my $defaults = {
 	neg=>'bad',
 	MASK_THRESH => 500,
@@ -124,6 +124,7 @@ sub read_files {
 	REJECT_BY_CROTA => 2,
 	REJECT_BY_PATCH => [5, 0.05, 0.05], # [median size, rel. trigger, rel. amount for bad image]
 	REJECT_LIST_FNAME=> "./rejected.txt",
+	FILE_STATUS_DB => "./files.db",
 	CLEAN_BAD => 1,
 	BAD_DIL_PIX => 1,
 	BAD_DIL_FR => 0
@@ -131,6 +132,38 @@ sub read_files {
 
     for my $k(keys %$defaults){
 	$opt->{$k} = $defaults->{$k} unless(exists($opt->{$k}));
+    }
+
+
+    ##############################
+    # Preload a dbh connection if possible; otherwise set it to a false value
+    my $dbh;
+    eval 
+    {
+	local($@);
+	eval q/use DBI;/;
+	if(  (!$@)  and   ($DBI::VERSION) ){
+	    $dbh = DBI->connect("dbi:SQLite:dbname=".$opt->{FILE_STATUS_DB},"","",{RaiseError=>0,AutoCommit=>1});
+	    unless($dbh) {
+		print STDERR "Couldn't connect to $opt->{FILE_STATUS_DB}, will check all files for validity";
+	    } else {
+		# Make sure the table exists
+		my $sth = $dbh->prepare(q{SELECT * from 'sqlite_master' where type='table' and name='files'});
+		$sth->execute();
+		my $tab = $sth->fetch();
+		print "tab is: ".sdump($tab);
+		unless(defined($tab) and @$tab) {
+		    $sth = $dbh->prepare(q{CREATE TABLE 'files' ('name' STRING, 'status' STRING, PRIMARY KEY('name'))});
+		    $sth->execute;
+		}
+	    }	    
+	}
+    };
+
+    if($dbh) {
+	print "** Found DB $opt->{FILE_STATUS_DB}; will shortcut file filtering\n";
+    } else {
+	print "** Couldn't find DB $opt->{FILE_STATUS_DB}; will not shortcut file filtering\n";
     }
 
     print cards($opt);
@@ -145,7 +178,6 @@ sub read_files {
 	     die "read_files: input hash needs both RAW_CUBE and RAW_HDRS fields\n";
 	 }
      } elsif( ref $in eq 'ARRAY') {
-
 	 # Handle case where an array of FITS files is entered
 	 if( ref $in->[0] eq 'PDL' ) {
 	     # prefrobnicate 2048x2048 images down to 1024x1024
@@ -244,86 +276,135 @@ sub read_files {
 	    clean_baddies($ims, 2);
 	}
     }
-    
-    ##############################
-    # Deal with rejecting rotated files...
-    if($opt->{'REJECT_BY_CROTA'}) {
-	my $crota = pdl( map { $_->{CROTA}} @{$in->{RAW_HDRS}} );
-	my $cm = $crota->median;
-	my $mask = ( ( $crota <= $cm + $opt->{'REJECT_BY_CROTA'} ) & 
-		     ( $crota >= $cm - $opt->{'REJECT_BY_CROTA'} ) );
-	if($mask->sum < $mask->nelem) {
-	    print "Rejecting frames for CROTA: ".((!$mask)->which)."\n";
-	    open FOO,">>".$opt->{REJECT_LIST_FNAME};
-	    for my $fn((!$mask)->which) {
-		printf FOO "CROTA\t%s\t%s\n",$in->{RAW_HDRS}->[$fn]->{filename},$ff[$fn];
-	    }
-	    close FOO;
-	    my $goodies = $mask->which;
-	    $ims = $ims->(:,:,$goodies)->sever;
-	    $in->{RAW_CUBE} = $ims;
-	    $in->{RAW_HDRS} = [ @{$in->{RAW_HDRS}}[$goodies->list] ];
-	    @ff = @ff[$goodies->list];
-	}
-    }
-    
-    ##############################
-    # Deal with rejecting bad files...
-    if($opt->{'REJECT_BY_SUM'}) {
-	my $sums = $ims->sumover->sumover;
-	my $median = $sums->median;
-	my $medlo = $median / (1 + $opt->{'REJECT_BY_SUM'});
-	my $medhi = $median * (1 + $opt->{'REJECT_BY_SUM'});
-	
-	my @baddies = (($sums > $medhi) | ($sums < $medlo))->which->list;
-	
-	if(@baddies) {
-	    print "read_files: Rejecting frames ".join(",",@baddies)."\n";
-	    open FOO, ">>".$opt->{REJECT_LIST_FNAME};
-	    for my $fn(@baddies) {
-		printf FOO "SUM\t%s\t%s\n",$in->{RAW_HDRS}->[$fn]->{filename},$ff[$fn];
-	    }
-	    close FOO;
-	    my $goodies = (($sums <= $medhi) & ($sums >= $medlo))->which;
-	    $ims = $ims->(:,:,$goodies)->sever;
-	    $in->{RAW_CUBE} = $ims;
-	    $in->{RAW_HDRS} = [ @{$in->{RAW_HDRS}}[$goodies->list] ];
-	    @ff = @ff[$goodies->list];
-	}
-    }
 
-    ##############################
-    # Deal with rejecting files with bad patches in them
-    if($opt->{'REJECT_BY_PATCH'}) {
-    	my $median = $ims->mv(2,0)->medover;
-	print "Rejecting by patches: ";
-	my( $size, $thresh, $amt ) = @{$opt->{'REJECT_BY_PATCH'}};
-	my $kk = ones($size,$size);
-	print "size is $size; thresh is $thresh; amt is $amt\n";
-	my @baddies = ();
-	for my $i(0..$ims->dim(2)-1) {
-	    my $im = $ims->(:,:,($i))->med2d($kk);
-	    my $n = ((($im - $median)/$median)->abs > $thresh)->sum;
-	    my $bad = (($n/$im->nelem) > $amt);
-	    print "$i:".($bad?"B":"g")." ";
-	    push(@baddies,$i) if( $bad );
-	}
-	print "\n";
-	if(@baddies) {
-	    print "read_files: Rejecting frames ".join(",",@baddies)."\n";
-	    open FOO,">>".$opt->{REJECT_LIST_FNAME};
-	    for my $fn(@baddies) {
-		printf FOO "PATCH\t%s\t%s\n",$in->{RAW_HDRS}->[$fn]->{filename},$ff[$fn];
+    if($opt->{REJECT_BY_CROTA} or $opt->{REJECT_BY_SUM} or $opt->{REJECT_BY_PATCH}) {
+	my @status = ();
+	my @dbstatus=();
+
+	my $db_values = {};
+	# Short-circuit the rejection logic by checking the database
+	if($dbh) {
+	    my $sth;
+
+	    my @clause = map { sprintf(q{ name='%s' },$_->{'FILENAME'}) } @{$in->{RAW_HDRS}};
+	    my $clause = join(" or ",@clause);
+		
+	    my $sth = $dbh->prepare(qq{SELECT * from 'files' where $clause});
+	    $sth->execute;
+	    my $repl = $sth->fetchall_arrayref();
+	    for my $i(0..$#{$repl}) {
+		my ($name,$status) = @{$repl->[$i]};
+		$db_values->{$name} = $status;
 	    }
-	    close FOO;
-	    my $goodmask = ones($ims->dim(2));
-	    $goodmask->(pdl(@baddies)) .= 0;
-	    my $goodies = which($goodmask);
-	    $ims = $ims->(:,:,which($goodmask))->sever;
-	    $in->{RAW_CUBE} = $ims;
-	    $in->{RAW_HDRS} = [ @{$in->{RAW_HDRS}}[$goodies->list] ];
-	    @ff= @ff[$goodies->list];
+
+	    for my $i(0..$#{$in->{RAW_HDRS}}) {
+		$status[$i] = $db_values->{$in->{RAW_HDRS}->[$i]->{'FILENAME'}};
+	    }
 	}
+	@dbstatus = @status;
+
+	##############################
+	# Deal with rejecting rotated files...
+	# Since this is cheap, we do it regardless of status
+	if($opt->{'REJECT_BY_CROTA'}) {
+	    my $crota = pdl( map { $_->{CROTA}} @{$in->{RAW_HDRS}} );
+	    my $cm = $crota->median;
+	    my $mask = ( ( $crota <= $cm + $opt->{'REJECT_BY_CROTA'} ) & 
+			 ( $crota >= $cm - $opt->{'REJECT_BY_CROTA'} ) );
+
+	    if($mask->sum < $mask->nelem) {
+		print "read_files: CROTA filter rejected frames ";
+		for my $i(0..$#{$in->{RAW_HDRS}}){
+		    print "$i ";
+		    $status[$i] = 'CROTA' unless($mask);
+		}
+		print "\n";
+	    }
+	}
+	
+	##############################
+	# Deal with rejecting bad files...
+	if($opt->{'REJECT_BY_SUM'}) {
+	    my $sums = $ims->sumover->sumover;
+	    my $median = $sums->median;
+	    my $medlo = $median / (1 + $opt->{'REJECT_BY_SUM'});
+	    my $medhi = $median * (1 + $opt->{'REJECT_BY_SUM'});
+	    
+	    my @baddies = (($sums > $medhi) | ($sums < $medlo))->which->list;
+	    
+	    if(@baddies) {
+		print "read_files: SUM filter rejected frames ".join(",",@baddies)."\n";
+		for my $i(@baddies) {
+		    $status[$i] = 'SUM';
+		}
+	    }
+	}
+
+	##############################
+	# Deal with rejecting files with bad patches in them
+	if($opt->{'REJECT_BY_PATCH'}) {
+	    my $median = $ims->mv(2,0)->medover;
+	    print "Rejecting by patches: ";
+	    my( $size, $thresh, $amt ) = @{$opt->{'REJECT_BY_PATCH'}};
+	    my $kk = ones($size,$size);
+	    print "size is $size; thresh is $thresh; amt is $amt\n";
+	    my @baddies = ();
+	    for my $i(0..$ims->dim(2)-1) {
+		if($status[$i]) {
+		    print "$i:. ";
+		    next;
+		}
+		my $im = $ims->(:,:,($i))->med2d($kk);
+		my $n = ((($im - $median)/$median)->abs > $thresh)->sum;
+		my $bad = (($n/$im->nelem) > $amt);
+		print "$i:".($bad?"B":"g")." ";
+		push(@baddies,$i) if( $bad );
+	    }
+	    print "\n";
+	    if(@baddies) {
+		print "read_files: PATCH filter rejected ".join(" ",@baddies)."\n";
+		for my $i(@baddies) {
+		    $status[$i] = "PATCH";
+		}
+	    }
+	}
+
+	##############################
+	# Update the db as necessary
+
+	if($dbh) {
+	    for $i(0..$#{$in->{RAW_HDRS}}) {
+		my $sth;
+		unless($dbstatus[$i]) {
+		    $sth = $dbh->prepare(sprintf(q{INSERT INTO 'files' VALUES ('%s','%s')},
+						 $in->{RAW_HDRS}->[$i]->{'FILENAME'},
+						 $status[$i]//'ok'
+					 )
+			);
+		    $sth->execute;
+		} else {
+		    $sth = $dbh->prepare(sprintf(q{UPDATE 'files' SET status='%s' WHERE 'name'='%s'},
+						 ($status[$i]//'ok'),
+						 $in->{RAW_HDRS}->[$i]->{'FILENAME'}
+					 )
+			);
+		    $sth->execute;
+		}
+	    }
+	}
+
+	##############################
+	# Carry out the trim - reject the files
+	my @goodies = ();
+	for my $i(0..$#status) {
+	    push(@goodies,$i) if((!defined($status[$i])) or ($status[$i] =~ m/ok/i));
+	}
+	my $goodies = pdl(@goodies);
+	$ims = $ims->(:,:,$goodies)->sever;
+	$in->{RAW_CUBE} = $ims;
+	$in->{RAW_HDRS} = [ @{$in->{RAW_HDRS}}[$goodies->list] ];
+	@ff = @ff[$goodies->list];
+
     }
 
     my $out = $in;

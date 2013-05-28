@@ -57,11 +57,11 @@ sub shift_to_instrument {
 
 	# Make a dilated BAD mask (dilated by 1 pixel).
 	print "m.";
-	$mask = (($hash->{'CEL_CUBE'}->(:,:,($i))->isbad->float)->convolveND(ones(3,3)) > 0)->byte;
+	my $mask = (  (($hash->{'CEL_CUBE'}->(:,:,($i))->isbad->float)->convolveND(ones(3,3))) > 0 )->byte;
 
 	# Remap the BAD mask using sampling
 	print "mm.";
-	$ipmask = $mask->map(
+	my $ipmask = $mask->map(
 	    $t, 
 	    $siz,
 	    {method=>'s', pix=>1});
