@@ -17,7 +17,7 @@ C<shift_to_celestial>.
 sub shift_to_instrument {
     my $hash = shift;
     my $opt = shift;
-    $VERSION = "2.0 5-May-2013";
+    $VERSION = "2.1 24-May-2013";
 
     $opt = {} unless(defined $opt);
 
@@ -38,7 +38,7 @@ sub shift_to_instrument {
 						       $hash->{RAW_HDRS}->[0]->{NAXIS1},
 						       $hash->{RAW_HDRS}->[0]->{NAXIS2},
 						       0+@{$hash->{RAW_HDRS}});
-    
+    $hash->{'CLEAN_CUBE'}->badflag(1);
     
     for $i(0..$hash->{'CEL_CUBE'}->dim(2)-1) {
 	print "Resampling image $i of ".$hash->{'CEL_CUBE'}->dim(2)." back to observing coordinates...\n";
@@ -51,16 +51,32 @@ sub shift_to_instrument {
 	
         my $t_crop = t_linear(pre=>[ - $xr->at(0) , -$yr->at(0) ]);
 
-	$hash->{'CLEAN_CUBE'}->badflag(1);
 	print "i=$i\n";
-	$hash->{'CLEAN_CUBE'}->(:,:,($i)) .= 
-	    $hash->{'CEL_CUBE'}->(:,:,($i))->map(
-		!$t_nl x !$t_o x $t_nl x !$t_crop, 
-		[$hash->{CLEAN_CUBE}->dim(0),$hash->{CLEAN_CUBE}->dim(1)],
-		{method=>$opt->{'INTERP_METHOD'}, pix=>1}
-	    );
-    }
+	my $t =	!$t_nl x !$t_o x $t_nl x !$t_crop;
+	my $siz = [$hash->{CLEAN_CUBE}->dim(0),$hash->{CLEAN_CUBE}->dim(1)];
 
+	# Make a dilated BAD mask (dilated by 1 pixel).
+	print "m.";
+	$mask = (($hash->{'CEL_CUBE'}->(:,:,($i))->isbad->float)->convolveND(ones(3,3)) > 0)->byte;
+
+	# Remap the BAD mask using sampling
+	print "mm.";
+	$ipmask = $mask->map(
+	    $t, 
+	    $siz,
+	    {method=>'s', pix=>1});
+
+	print "data";
+	# Remap the data and mark it BAD if necessary.
+	$hash->{'CLEAN_CUBE'}->(:,:,($i)) .= 
+	    $hash->{'CEL_CUBE'}->(:,:,($i))->map( 
+		$t, 
+		$siz, 
+		{method=>$opt->{'INTERP_METHOD'}, pix=>1}
+	    )->setbadif($ipmask);
+	print " ";
+    }
+    print "\n";
     push(@{$hash->{log}},"  shift_to_instrument v$VERSION");
     print "shift_to_instrument returning\n";
     return $hash;
