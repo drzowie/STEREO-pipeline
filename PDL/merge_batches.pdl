@@ -16,7 +16,7 @@ use Date::Format;
 sub merge_batches {
     my $files = shift;
     my $opt = shift;
-    my $VERSION = "2.1 28-May-2013";
+    my $VERSION = "2.2 29-May-2013";
     
     $opt = {} unless defined($opt);
     $opt->{MERGED_DIR} = "L2" unless(defined $opt->{MERGED_DIR});
@@ -25,6 +25,8 @@ sub merge_batches {
     $opt->{START} = 0 unless(defined $opt->{START});
     $opt->{REGEXP} = 'clean\-(.*)\-\-BATCH.*' unless(defined $opt->{REGEXP});
     $opt->{PTYPE} = '' unless(defined($opt->{PTYPE}));  # processing type -- 'S' or 'M'
+    $opt->{BAD_THRESH} = 1e3 unless(defined($opt->{BAD_THRESH}));
+
     my $ptype = $opt->{PTYPE};
 
     if($opt->{MERGED_DIR}  and  !(-d $opt->{MERGED_DIR})){
@@ -108,7 +110,7 @@ sub merge_batches {
 		    my $hdr = $cube[0]->gethdr;
 		    undef @cube;
 		    
-		    my $baddies = !($cube->isfinite->short);  # actual baddies
+		    our $baddies = !($cube->isfinite->short & ($cube->abs < $opt->{BAD_THRESH}) );  # actual baddies
 		    $cube->where($baddies) .= 0;  	      # Mask out the bad values in the original cube so they don't cause trouble later
 
 		    my $badmask = $baddies->copy;             # becomes a dilated mask
@@ -116,17 +118,19 @@ sub merge_batches {
 		    # dilate the badmask
 		    for my $i(0..$badmask->dim(0)-1) {
 			print ",";
-			$badmask->(($i)) .= $badmask->(($i))->convolveND(ones($opt->{MARGIN}+2,$opt->{MARGIN}+2),{method=>'direct'});
+			$badmask->(($i)) .= $badmask->(($i))->convolveND(ones($opt->{MARGIN}*2+1,1),{method=>'direct'});
+			$badmask->(($i)) .= $badmask->(($i))->convolveND(ones(1,$opt->{MARGIN}*2+1),{method=>'direct'});
 		    }
 
 		    # Generate the feathering screen.  Start with 1 for good, 0 for bad.
-		    my $weight = (!$baddies)->float;
+		    my $weight = ($badmask==0)->float;
 
 		    # Convolve the weight for smooth transition
 		    for my $i(0..$weight->dim(0)-1) {
 		    	print ".";
-			$weight->(($i)) .= $weight->(($i))->convolveND($k,{method=>'direct'});
+			$weight->(($i)) .= $weight->(($i))->convolveND($k);
 		    }
+		    $weight->where($weight < 1e-3) .= 0;
 
 		    my $avg = ($cube*$weight)->sumover / $weight->sumover;
 		    
