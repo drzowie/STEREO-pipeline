@@ -6,7 +6,15 @@
 
 =for ref
 
-You feed in a collection of file names and an optional options hash, and the files are merged into a single set of FITS files in the destination directory ("merged" by default or set by the option "MERGED_DIR").
+You feed in a collection of file names and an optional options hash,
+and the files are merged into a single set of FITS files in the
+destination directory ("L2" by default or set by the option
+"MERGED_DIR").
+
+The batch files are averaged together wherever there are valid values
+in two or more batch files; near the transition a given batch is ramped
+up smoothly via Hanning window (by default, this smoothing region is 40
+pixels wide; you can set it with the "MARGIN" option).
 
 =cut
 
@@ -110,7 +118,7 @@ sub merge_batches {
 		    my $hdr = $cube[0]->gethdr;
 		    undef @cube;
 		    
-		    our $baddies = !($cube->isfinite->short & ($cube->abs < $opt->{BAD_THRESH}) );  # actual baddies
+		    my $baddies = !($cube->isfinite->short & ($cube->abs < $opt->{BAD_THRESH}) );  # actual baddies
 		    $cube->where($baddies) .= 0;  	      # Mask out the bad values in the original cube so they don't cause trouble later
 
 		    my $badmask = $baddies->copy;             # becomes a dilated mask
