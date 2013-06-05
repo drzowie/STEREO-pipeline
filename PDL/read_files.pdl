@@ -142,7 +142,7 @@ sub read_files {
     {
 	local($@);
 	eval q/use DBI;/;
-	if(  (!$@)  and   ($DBI::VERSION) ){
+	if(  (!$@)  and   ($DBI::VERSION) and $opt->{FILE_STATUS_DB} ){
 	    $dbh = DBI->connect("dbi:SQLite:dbname=".$opt->{FILE_STATUS_DB},"","",{RaiseError=>0,AutoCommit=>1});
 	    unless($dbh) {
 		print STDERR "Couldn't connect to $opt->{FILE_STATUS_DB}, will check all files for validity";
@@ -277,6 +277,8 @@ sub read_files {
 	}
     }
 
+    print "before rejections: cube is ".join("x",$ims->dims)."\n\n";
+
     if($opt->{REJECT_BY_CROTA} or $opt->{REJECT_BY_SUM} or $opt->{REJECT_BY_PATCH}) {
 	my @status = ();
 	my @dbstatus=();
@@ -369,6 +371,11 @@ sub read_files {
 	    }
 	}
 
+	print "read_files: status is:\n";
+	for $i(0..$#status){
+	    print "$i\t$status[$i]\n";
+	}
+
 	##############################
 	# Update the db as necessary
 
@@ -396,9 +403,16 @@ sub read_files {
 	##############################
 	# Carry out the trim - reject the files
 	my @goodies = ();
-	for my $i(0..$#status) {
-	    push(@goodies,$i) if((!defined($status[$i])) or ($status[$i] =~ m/ok/i));
+	print "preparing good list:";
+	for my $i(0..$ims->dim(2)-1) {
+	    if((!defined($status[$i])) or (!$status[$i]) or ($status[$i] =~ m/ok/i)) {
+		push(@goodies,$i);
+		print ".";
+	    } else {
+		print "'".$status[$i]."'";
+	    }
 	}
+	print "\n";
 	my $goodies = pdl(@goodies);
 	$ims = $ims->(:,:,$goodies)->sever;
 	$in->{RAW_CUBE} = $ims;
@@ -407,11 +421,16 @@ sub read_files {
 
     }
 
+    print "after rejections: cube is ".join("x",$ims->dims)."\n\n";
+
     my $out = $in;
     
     if($opt->{'REMOVE_FLUCTUATIONS'}) {
 	remove_fluctuations($ims,$opt);
     }
+
+    print "after fluctuations: cube is ".join("x",$ims->dims)."\n\n";
+
     
     my $rvm = pdl(1);
 
@@ -440,6 +459,7 @@ sub read_files {
 	 }
      }
 
+    print "returning: cube is ".join("x",$ims->dims)."\n\n";
 
     return $out;
 

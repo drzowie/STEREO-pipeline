@@ -99,6 +99,8 @@ sub hi1_pipeline {
 	KEEP_DATA               => 0,           # Whether to keep (and return) the data cubes
 	KEEP_NULLED             => 1,           # Whether to keep the stellar nulled data as well as motion-filtered.
 
+	FILE_STATUS_DB          => 0,
+
 	pct			=> 2,     # 2% for F corona - could be smaller maybe, but works OK
 	sm                      => 0,     # No smoothing at the remove_f_corona stage
 	bin			=> 0,     # don't bother rebinning 2k x 2k images - just reject them
@@ -155,12 +157,18 @@ sub hi1_pipeline {
 
     our $hash;
 
+    print "\n***\nin_list has ".(0+@$in_list)." elements\n***\n\n";
+
     ##############################
     # Read and filter files, and create the working hash.
     $hash = read_files($in_list,$opt);
 
+    print "\n***\nAfter read_files: RAW_CUBE is ".join("x",$hash->{RAW_CUBE}->dims)."\n***\n\n";
+
     # Remove the F corona
     remove_f_corona($hash,$opt);
+
+    print "\n********\nAfter remove_f_corona: RAW_CUBE is ".join("x",$hash->{RAW_CUBE}->dims)."; BKSUB_CUBE is ".join("x",$hash->{BKSUB_CUBE}->dims)."\n********\n\n";
 
     delete $hash->{RAW_CUBE} unless($opt->{KEEP_DATA});
 

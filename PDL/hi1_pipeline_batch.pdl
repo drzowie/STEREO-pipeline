@@ -144,7 +144,7 @@ sub hi1_pipeline_batch {
 
     my $n_expected = $opt->{BATCHLENGTH} * 24 * 60 / $opt->{CADENCE};
     
-    if(@ff < $n_expected * 0.8) {
+    if(@ff < $n_expected * 0.667) {
 	die "Too few files to run batch $batchno -- expected $n_expected, found ".(0+@ff)."\n";
     }
 
