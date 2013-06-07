@@ -149,11 +149,20 @@ sub null_stars {
 	print "$i ";
     }
 
+    print "Dilating...\n";
+
     $hash->{CEL_CUBE}->badflag(1);
+    print "whichND...\n";
     my $locus = whichND($h2 >= $opt->{NULL_BADVAL_THRESH} ); 
+    print "locus is ".join("x",$locus->dims)."\n";
     # Dilate.
+    print "dilating badval locus...\n";
     $locus = ($locus - pdl(2,2,0) + ndcoords(5,5,1)->(:,*1))->mv(0,-1)->clump(3)->mv(-1,0)->sever;
+    print "after dilation: locus is ".join("x",$locus->dims)."\n";
+
+    print "setting bad values...\n";
     $hash->{CEL_CUBE}->range($locus,[0],'e') .= $hash->{CEL_CUBE}->badvalue;
+    print "calling clean_baddies...\n";
     clean_baddies( $hash->{CEL_CUBE}, 0 );
 
 
