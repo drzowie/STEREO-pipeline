@@ -1,0 +1,24 @@
+=head2 date_to_batch - given a date, return a batch number
+
+=cut
+
+use strict;
+use Date::Parse q/str2time/;
+
+sub date_to_batch {
+    my $date1 = shift;
+    my $t1 = str2time($date1,"UTC");
+
+    my $date0 = "2007-01-01T00:00:00";
+    my $t0 = str2time($date0,"UTC");
+
+
+    my $diff = $t1 - $t0;
+    if($t1<$t0){
+	die "date_to_batch: t1 is before t0 (t1=$t1, t0=$t0).  Did you feed in a correct date?";
+    }
+
+    my $batch = int(($t1-$t0) / 3600 / 12);
+    return $batch;
+}
+    
