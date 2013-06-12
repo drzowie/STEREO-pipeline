@@ -30,7 +30,7 @@ sub clean_baddies {
     my $cube  =shift;
     my $crossframes = shift;
     my $maxn = shift // 50;
-
+    my $max_pct = shift // 20;
     my $badplaces;
 
     my $last_bad = $cube->nelem;
@@ -46,7 +46,7 @@ sub clean_baddies {
 	    return $cube;
 	}
 
-	die "clean_baddies: too many bad values!" if ($badplaces->dim(1) > $cube->nelem / 5);
+	die "clean_baddies: too many bad values!" if ($badplaces->dim(1) / $cube->nelem > ($max_pct/100) );
 	die "clean_baddies: Not enough progress, I quit (1% required)" if($badplaces->dim(1) / $last_bad > 0.99);
 
 	print "(".$badplaces->dim(1).")...";

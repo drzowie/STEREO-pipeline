@@ -97,7 +97,8 @@ sub null_stars {
 	NULL_SMOOTH_FRAMES   => 1,         # Number of frames to smooth over for median filtering (1 = no smoothing)
 	NULL_SMOOTH_SIZE     => [11,5],    # Number of pixels (X,Y) to smooth over for median filtering
 	NULL_MIN_PCT         => 10,        # Percentile value to keep as the "zero" for each pixel
-	NULL_BADVAL_THRESH   => 3          # Bad-pixel threshold, in units of image average value (applied after unsharp masking)
+	NULL_BADVAL_THRESH   => 3,         # Bad-pixel threshold, in units of image average value (applied after unsharp masking)
+	MAX_PCT_BAD          => 25,        # Maximum percentage of pixels cut out for being too bright
     };
     
     for my $k(keys %$defaults) {
@@ -155,15 +156,18 @@ sub null_stars {
     print "whichND...\n";
     my $locus = whichND($h2 >= $opt->{NULL_BADVAL_THRESH} ); 
     print "locus is ".join("x",$locus->dims)."\n";
-    # Dilate.
-    print "dilating badval locus...\n";
-    $locus = ($locus - pdl(2,2,0) + ndcoords(5,5,1)->(:,*1))->mv(0,-1)->clump(3)->mv(-1,0)->sever;
-    print "after dilation: locus is ".join("x",$locus->dims)."\n";
 
-    print "setting bad values...\n";
-    $hash->{CEL_CUBE}->range($locus,[0],'e') .= $hash->{CEL_CUBE}->badvalue;
+    print "setting bad values";
+    for my $dx(-2..2) {
+	for my $dy(-2..2){
+	    print ".";
+	    $hash->{CEL_CUBE}->range($locus+pdl($dx,$dy),[0],'e') .= $hash->{CEL_CUBE}->badvalue;
+	}
+    }
+    print "\n";
+
     print "calling clean_baddies...\n";
-    clean_baddies( $hash->{CEL_CUBE}, 0 );
+    clean_baddies( $hash->{CEL_CUBE}, 0, undef, $opt->{MAX_PCT_BAD} );
 
 
     ##############################

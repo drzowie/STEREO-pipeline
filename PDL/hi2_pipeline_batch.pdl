@@ -64,9 +64,9 @@ sub hi2_pipeline_batch {
     $opt->{LIST_ONLY}   = 0 unless(exists($opt->{LIST_ONLY}));
 
     my $opt_defaults = {
-     HI1_SC              => "a",
-     HI1_L1_DIR          => "/net/helio/d0/stereo/L1/%s/img/hi_2",
-     HI1_OUTPUT_TEMPLATE => "hi2-batch-%4.4d"
+     HI2_SC              => "a",
+     HI2_L1_DIR          => "/net/helio/d0/stereo/L1/%s/img/hi_2",
+     HI2_OUTPUT_TEMPLATE => "hi2-batch-%4.4d"
     };
 
     for $k(keys %$opt_defaults){

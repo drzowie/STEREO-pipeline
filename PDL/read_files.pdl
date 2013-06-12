@@ -432,11 +432,6 @@ sub read_files {
     print "after fluctuations: cube is ".join("x",$ims->dims)."\n\n";
 
     
-    my $rvm = pdl(1);
-
-    if($opt->{MASK_RADIUS}) {
-	$rvm = ( rvals($out->{RAW_CUBE}->(:,:,(0))) < $opt->{MASK_RADIUS} )->byte;
-    }
 
      print "Making badval masks...\n";
      $out->{MASK_CUBE} = ones(byte, $out->{RAW_CUBE}->dims);
@@ -444,20 +439,30 @@ sub read_files {
 	 
      if($opt->{MARK_BAD}) {
 	 print "marking bad points...\n";
+
 	 for $i(0..$out->{RAW_CUBE}->dim(2)-1) {
 	     my $m = 1;
 	     if($opt->{MASK_THRESH}) {
 		 $m = ($out->{RAW_CUBE}->(:,:,($i))->med2d(ones(3,3)) <= $opt->{MASK_THRESH})->convolveND(ones(3,3)/9);
 	     }
-	     $out->{MASK_CUBE}->(:,:,($i)) .= ($rvm * $m) > 0.999 ;
+	     $out->{MASK_CUBE}->(:,:,($i)) .= $m > 0.999 ;
 	     print "$i ";
 	 }
-	 print "\n";
 	 
-	 if($opt->{'neg'} eq 'mask') {
-	     $out->{RAW_CUBE}->where($ims>10000) .= 10000;
+	 $out->{RAW_CUBE} = $out->{RAW_CUBE}->setbadif(!$out->{MASK_CUBE});
+
+	 if($opt->{MASK_RADIUS}) {
+	     print "mask_radius is $opt->{MASK_RADIUS}\n";
+	     my $rvm =  ( rvals($out->{RAW_CUBE}->(:,:,(0))) < $opt->{MASK_RADIUS} )->byte;
+	     $out->{MASK_CUBE} &= $rvm;
+	     $out->{RAW_CUBE}->indexND(0+whichND($rvm==0)) .= 0;
 	 }
+
+
+	 clean_baddies($out->{RAW_CUBE},0,100,50);
+	 print "\n";
      }
+
 
     print "returning: cube is ".join("x",$ims->dims)."\n\n";
 

@@ -22,6 +22,11 @@ sub hi2_pipeline {
     $opt->{FINAL_POLY_STEP} = 0 unless exists($opt->{FINAL_POLY_STEP});
     $opt->{FINAL_ZERO_STEP} = 0 unless exists($opt->{FINAL_ZERO_STEP});
 
+
+    $opt->{DIST_MIN_PCORR} = 0.9 unless exists($opt->{DIST_MIN_PCORR});
+    $opt->{DIST_CORRTIME}  = 5   unless exists($opt->{DIST_CORRTIME});
+    $opt->{DIST_CORR_RSIZE}= 10  unless exists($opt->{DIST_CORR_RSIZE});
+
     print "hi2_pipeline: opt is:\n";
     for(sort keys %$opt) {
 	print "$_\t$opt->{$_}\n";

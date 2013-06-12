@@ -42,7 +42,7 @@ sub get_distortion_params2 {
     $opt->{'DIST_CORR_RSIZE'}  = 35                      unless(exists($opt->{'DIST_CORR_RSIZE'}));
     $opt->{'DIST_CORR_PSIZE'}  = 35                      unless(exists($opt->{'DIST_CORR_PSIZE'}));
     $opt->{'DIST_MIN_PCORR'}   = 0.95                    unless(exists($opt->{'DIST_MIN_PCORR'}));
-    $opt->{'DIST_CORRTIME'}    = 10                      unless(exists($opt->{'DIST_CORRTIME'}));
+    $opt->{'DIST_CORRTIME'}    = 6                       unless(exists($opt->{'DIST_CORRTIME'}));
     $opt->{'DIST_GUESS_DRIFTRATE'} = 72/5                unless(exists($opt->{'DIST_GUESS_DRIFTRATE'}));
     $opt->{'DIST_UNSHARP_D'}   = 11                      unless(exists($opt->{'DIST_UNSHARP_D'}));
     $opt->{'NPROC'} = 3                                  unless(exists($opt->{'NPROC'}));
@@ -126,8 +126,8 @@ sub get_distortion_params2 {
     
     my @of = ();
     my @loc = ();
-    for( $i=0; $i < $opt->{'DIST_CORR_NSAMP'}; $i++ ) {
-	for($j=0; $j < $opt->{'DIST_CORR_NSAMP'}; $j++) {
+    for( $j=0; $j < $opt->{'DIST_CORR_NSAMP'}; $j++ ) {
+	for($i=0; $i < $opt->{'DIST_CORR_NSAMP'}; $i++) {
 	    my $loc = pdl( ($i+0.5) * ($hash->{'BKSUB_CUBE'}->dim(0)/($opt->{'DIST_CORR_NSAMP'}+1)),
 			   ($j+0.5) * ($hash->{'BKSUB_CUBE'}->dim(1)/($opt->{'DIST_CORR_NSAMP'}+1))
 		);
@@ -139,7 +139,11 @@ sub get_distortion_params2 {
 	    if(defined $a){
 		push(@of,$a);
 		push(@loc, $loc);
-		print ".";
+		if(all(isfinite($a))) {
+		    print ".";
+		} else {
+		    print "-";
+		}
 	    }
 	    else {
 		print "!";
@@ -153,13 +157,7 @@ sub get_distortion_params2 {
     my $of0 = pdl(@of);
     my $looplocs = pdl(@loc);
     
-    my $mask = 
-	( ($of0->((0))!=0) & 
-	  (($of0->((0))-$guess_offset)->abs < 6) & 
-	  (($of0->((1)))->abs < 6) &
-	  ((($looplocs-512)*($looplocs-512))->sumover->sqrt < 400)
-	);
-    $mask = isfinite($of0->((0))) & isfinite($of0->((1)));
+    my $mask = isfinite($of0->((0))) & isfinite($of0->((1)));
     print "mask is $mask\n";
     our $of00 = $of0->copy;
     my $loc = $looplocs->(:, which($mask));
