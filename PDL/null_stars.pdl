@@ -84,12 +84,17 @@ dilated 5x5 and filled in with neighboring values.
 
 =back
 
+=head3 HISTORY
+
+2.0 - early May 2013
+2.1 - Switched bad-value dilation from pre-expansion to multiple ops.
+
 =cut
 
 sub null_stars {
     my $hash = shift;
     my $opt = shift;
-    $VERSION = "2.0 5-May-2013";
+    $VERSION = "2.1 13-Jun-2013";
 
     $opt = {} unless defined($opt);
 
@@ -161,7 +166,7 @@ sub null_stars {
     for my $dx(-2..2) {
 	for my $dy(-2..2){
 	    print ".";
-	    $hash->{CEL_CUBE}->range($locus+pdl($dx,$dy),[0],'e') .= $hash->{CEL_CUBE}->badvalue;
+	    $hash->{CEL_CUBE}->range($locus+pdl($dx,$dy,0),[0],'e') .= $hash->{CEL_CUBE}->badvalue;
 	}
     }
     print "\n";

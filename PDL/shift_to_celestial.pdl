@@ -40,11 +40,16 @@ Options are:
 
 =item ALIGN_DEJITTER - flag indicating whether to perform dejittering
 
-=item ALIGN_PATCHSIZE - the size of the square alignment patch, in pixels
+=item ALIGN_PATCHSIZE - the size of the alignment patch, in pixels.  Scalar for square, 2-PDL for rect.
 
 =item INTERP_METHOD - the interpolation method to use ('j' by default)
 
 =back
+
+=head3 HISTORY
+
+2.1 - switch to hanning windows (rather than Gaussian ones) in interpolation
+2.2 - Allow rotation as a parameter for alignment if ALIGN_DEJITTER is set
 
 =cut
 
@@ -53,12 +58,12 @@ sub shift_to_celestial {
     my $hash = shift;
     my $opt = shift;
 
-    my $VERSION = "2.1 21-May-2013";
+    my $VERSION = "2.2 13-Jun-2013";
 
     $opt = {} unless(defined $opt);
     $opt->{'ALIGN_DEJITTER'} = 1    unless(defined $opt->{'ALIGN_DEJITTER'});
     $opt->{'ALIGN_PATCHSIZE'} = 50  unless(defined $opt->{'ALIGN_PATCHSIZE'});
-    $opt->{'INTERP_METHOD'} = 'j'   unless(defined $opt->{'INTERP_METHOD'}); # use default for science
+    $opt->{'INTERP_METHOD'} = 'h'   unless(defined $opt->{'INTERP_METHOD'}); # use default for science
     
     my $i;
     my $xr = $hash->{'D_PARAMS'}->{'xr'};
@@ -93,14 +98,19 @@ sub shift_to_celestial {
     my $x_center = ($xr->at(1)+$xr->at(0))/2;
     my $y_center = ($yr->at(1)+$yr->at(0))/2;
 
-    my $t_patchcrop = t_linear(pre=>[ - $x_center + $opt->{'ALIGN_PATCHSIZE'}/2,
-				      - $y_center + $opt->{'ALIGN_PATCHSIZE'}/2
+    my $align_patchsize = $opt->{'ALIGN_PATCHSIZE'} * pdl(1,1);
+    die "ALIGN_PATCHSIZE param must be scalar or 2-PDL\n" unless($align_patchsize->nelem==2 and $align_patchsize->ndims==1);
+
+    my @align_patchsize = $align_patchsize->list;
+
+    my $t_patchcrop = t_linear(pre=>[ - $x_center + $align_patchsize[0]/2,
+				      - $y_center + $align_patchsize[1]/2
 				      ]
 	);
     
     our $master_patch = ($hash->{'BKSUB_CUBE'}->(:,:,($dex0)) * $hash->{'MASK_CUBE'}->(:,:,($dex0))) -> map(
-	$t_patchcrop, # x !$t_nl x t_identity x $t_nl  [ trivial stuff commented out ]
-	[$opt->{'ALIGN_PATCHSIZE'},$opt->{'ALIGN_PATCHSIZE'}],
+	$t_patchcrop, 
+	\@align_patchsize,
 	{method=>$opt->{'INTERP_METHOD'},pix=>1,blur=>1.5}
 	);
 
@@ -118,11 +128,17 @@ sub shift_to_celestial {
 	if($opt->{ALIGN_DEJITTER}) {
 
 	    my $heur = sub {
-		my $dx = shift;
-		my $t_z = t_linear(pre=>[$dx->list]);
+		my $vec = shift;
+		my $dx = $vec->(0:1);
+		my $rot = $vec->at(2);
+
+		my $patch_cen = $align_patchsize/2;
+		# Offset by dx and rotate by $rot about the center of the patch
+		my $t_z = t_linear(pre=>$dx - $patch_cen, post=>$patch_cen, rot=>$rot);
+
 		our $newpatch = ($hash->{'BKSUB_CUBE'}->(:,:,($i)) * $hash->{'MASK_CUBE'}->(:,:,($i)))->map(
-		    $t_patchcrop x $t_z x !$t_nl x $t_o x $t_nl,
-		    [$opt->{'ALIGN_PATCHSIZE'},$opt->{'ALIGN_PATCHSIZE'}],
+		    $t_z x $t_patchcrop x !$t_nl x $t_o x $t_nl,
+		    \@align_patchsize,
 		    {method=>$opt->{'INTERP_METHOD'},pix=>1,blur=>1.5}
 		    );
 		my $p0 = $master_patch->clump(2);
@@ -135,12 +151,13 @@ sub shift_to_celestial {
 		my $p1p = $p1 - $p1av->(*1);
 		my $p1sd = ($p1p * $p1p)->average->sqrt;
 		$corr = ($p0p * $p1p)->average / $p0sd / $p1sd;
+
 		return 1.0 - $corr;
 	    };
 
 	    print "Finding nudge...";
 
-	    $nudge = amoeba($heur, pdl(0,0),0.1,1e-3,1e-5,1e3);
+	    $nudge = amoeba($heur, pdl(0,0,0), 0.1, 1e-3, 1e-5, 1e3);
 	    print "nudge is $nudge, corr is $corr.  ";
 	    if($corr<0.95){
 		print "Correlation sucks. Ignoring nudge\n";
