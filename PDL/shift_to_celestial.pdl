@@ -49,7 +49,7 @@ Options are:
 =head3 HISTORY
 
 2.1 - switch to hanning windows (rather than Gaussian ones) in interpolation
-2.2 - Allow rotation as a parameter for alignment if ALIGN_DEJITTER is set
+2.2 - Allow rotation as a parameter for alignment if ALIGN_DEJITTER is set; back to Gaussian windows
 
 =cut
 
@@ -63,7 +63,7 @@ sub shift_to_celestial {
     $opt = {} unless(defined $opt);
     $opt->{'ALIGN_DEJITTER'} = 1    unless(defined $opt->{'ALIGN_DEJITTER'});
     $opt->{'ALIGN_PATCHSIZE'} = 50  unless(defined $opt->{'ALIGN_PATCHSIZE'});
-    $opt->{'INTERP_METHOD'} = 'h'   unless(defined $opt->{'INTERP_METHOD'}); # use default for science
+    $opt->{'INTERP_METHOD'} = 'j'   unless(defined $opt->{'INTERP_METHOD'}); # use default for science
     
     my $i;
     my $xr = $hash->{'D_PARAMS'}->{'xr'};
