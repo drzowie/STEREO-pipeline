@@ -3,7 +3,7 @@
 =cut
 use PDL::Slatec;
 use PDL::NiceSlice;
-
+use strict;
 sub remove_polynomials {
     my $hash = shift;
     my $opt = shift;
@@ -17,57 +17,75 @@ sub remove_polynomials {
     $opt->{MIN_SMOOTH_SIZE} = 11 unless(defined($opt->{MIN_SMOOTH_SIZE}));
     $opt->{POLY_ORDER} = 3 unless(exists($opt->{POLY_ORDER}));
     $opt->{POLY_CUBE} = "CEL" unless(exists($opt->{POLY_CUBE}));
+    $opt->{POLY_TRIM_PERCENTILE} = 0 unless(exists($opt->{POLY_TRIM_PERCENTILE}));
 
     my $pc = $opt->{POLY_CUBE}."_CUBE";
     my $cube = $hash->{$pc};
-    $n = $cube->dim(2);
+    my $n = $cube->dim(2);
 
     my $c2;
     
     # If we're presmoothing, then presmooth.
     if($opt->{POLY_PRESMOOTH}) {
 	print "presmoothing for polynomial fit";
-	$c2 = PDL->new_from_specification($cube->mv(2,0)->dims);
+	$c2 = PDL->new_from_specification(float,$cube->mv(2,0)->dims);
 	for my $i(0..$c2->dim(0)-1) {
-	    $c2->(($i)) .= $cube->(:,:,($i))->med2d(ones($opt->{POLY_PRESMOOTH},$opt->{POLY_PRESMOOTH}));
+	    $c2->(($i)) .= $cube->(:,:,($i))->med2d(ones(1,$opt->{POLY_PRESMOOTH}))->med2d(ones($opt->{POLY_PRESMOOTH},1));
 	    print ".";
 	}
 	print "\n";
     } else {
-	$c2 = $cube->mv(2,0);
+	$c2 = $cube->mv(2,0);  # c2 is (time,x,y)
     }
 
     print "fitting polynomials (order=$opt->{POLY_ORDER})...\n";
     
     # Break the polyfit up into pieces to avoid hogging too much temp memory at once
-    $pieces = 10;
+    my $pieces = 10;
     print "10 easy pieces...\n";
+    my $ii;
     for $ii(0..9){
 	print "$ii...";
-	$min = int($ii * $c2->dim(2)/10);
-	$max = int(($ii+1) * $c2->dim(2)/10)-1;
+	my $min = int($ii * $c2->dim(2)/10);
+	my $max = int(($ii+1) * $c2->dim(2)/10)-1;
 	if($max >= $c2->dim(2)-1) {
 	    $max = $c2->dim(2)-1;
 	}
-	my $c3 = $c2->(:,:,$min:$max);
+	my $c3 = $c2->(:,:,$min:$max)->copy; # c3 is (time, x, y)
+	$c3->badflag(1);
 
-	my($ndeg, $r, $ierr, $a) = polyfit( xvals($n), $c3, ones(float,$n), $opt->{POLY_ORDER}, $eps );
+	if($opt->{POLY_TRIM_PERCENTILE}) {
+	    my $n_trim = $opt->{POLY_TRIM_PERCENTILE}/100*$c2->dim(0);
+	    my $c3i = (-$c3)->qsorti;  # BAD gets sorted at the end; negative makes largest values first
+	    my $c3dex = ndcoords($c3i->(0:$n_trim));
+	    $c3dex->((0)) .= $c3i->(0:$n_trim);
+	    $c3->indexND($c3dex) .= $c3->badvalue;
+
+	    $c3i = $c3->qsorti; 
+	    $c3dex = ndcoords($c3i->(0:$n_trim));
+	    $c3dex->((0)) .= $c3i->(0:$n_trim);
+	    $c3->indexND($c3dex) .= $c3->badvalue;
+	} 
+	my $eps = 0;
+	print "c3 is ".join("x",$c3->dims)."\n";
+	our($ndeg, $r, $ierr, $a) = polyfit( xvals($c3->dim(0)), $c3, ones(float,$c3->dim(0)), $opt->{POLY_ORDER}, $eps );
 	undef $ierr;
 	undef $a;
 	undef $ndeg;
-	$c3 -= $r;
+	$cube->mv(2,0)->(:,:,$min:$max) -= $r;
     }
     print "\n";
 
     # accumulate minimum so as not to eat too much memory...
     print "Accumulating minimum....";
-    my $ones = ones(float, $opt->{MIN_SMOOTH_SIZE}, $opt->{MIN_SMOOTH_SIZE});
-    $min = $cube->(:,:,(0))->med2d( $ones )->(:,:,*2)->copy;
-    for $i(1..$cube->dim(2)-1) {
+    my $ones = ones(float, 1, $opt->{MIN_SMOOTH_SIZE});
+    my $min = $cube->(:,:,(0))->med2d( $ones )->med2d($ones->mv(1,0))->(:,:,*2)->copy;
+    for my $i(1..$cube->dim(2)-1) {
 	print "$i...";
-	$min->(:,:,(1)) .= $cube->(:,:,($i))->med2d( $ones );
+	$min->(:,:,(1)) .= $cube->(:,:,($i))->med2d( $ones )->med2d($ones->mv(1,0));
 	$min->(:,:,(0)) .= $min->mv(2,0)->minimum;
     }
+    our $c_2 = $cube->copy;
 
     print "subtracting minimum smoothed value...\n";
     $cube -= $min->(:,:,(0));

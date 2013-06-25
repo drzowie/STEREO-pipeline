@@ -150,6 +150,8 @@ sub hi1_pipeline {
 	DEBUG_OUTPUT_PREFIX     => "tmp/",
 	CLEAN_MARGIN_FRAMES     => 2,
 
+	FINAL_POLY              => 1
+
     };
 
     my $k;
@@ -199,6 +201,12 @@ sub hi1_pipeline {
 	$hash->{NULLED_CUBE} = $hash->{CLEAN_CUBE};
 	delete $hash->{CLEAN_CUBE};
 	$hash->{NULLED_log} = [@{$hash->{log}}];
+
+	if($opt->{FINAL_POLY}) {
+	    print "Removing polynomials from NULLED (S) cube...\n";
+	    remove_polynomials($hash, {%$opt, POLY_CUBE=>'NULLED', POLY_TRIM_PERCENTILE=>10 });
+	}
+
 
 	if($opt->{OUTPUT_FILES}) {
 	    `mkdir $opt->{OUTPUT_DIR}-S`;
@@ -253,6 +261,11 @@ sub hi1_pipeline {
     print "Shift back to instrument...\n";
     shift_to_instrument($hash,$opt);
 
+    if($opt->{FINAL_POLY}) {
+	print "Removing polynomials...\n";
+	remove_polynomials($hash, {%$opt, POLY_CUBE=>'CLEAN'});
+    }
+
     # Dump output to files...
     if($opt->{OUTPUT_FILES}) {
         `mkdir $opt->{OUTPUT_DIR}-M`;
@@ -279,5 +292,6 @@ sub hi1_pipeline {
 	    wfits($im, $fname);
 	}
     }
+
     print "Returning...\n";
 }
