@@ -24,11 +24,11 @@ sub remove_polynomials {
     my $n = $cube->dim(2);
 
     my $c2;
-    
+
     # If we're presmoothing, then presmooth.
     if($opt->{POLY_PRESMOOTH}) {
 	print "presmoothing for polynomial fit";
-	$c2 = PDL->new_from_specification(float,$cube->mv(2,0)->dims);
+	$c2 = PDL->new_from_specification($cube->mv(2,0)->dims);
 	for my $i(0..$c2->dim(0)-1) {
 	    $c2->(($i)) .= $cube->(:,:,($i))->med2d(ones(1,$opt->{POLY_PRESMOOTH}))->med2d(ones($opt->{POLY_PRESMOOTH},1));
 	    print ".";
@@ -55,30 +55,40 @@ sub remove_polynomials {
 	$c3->badflag(1);
 
 	if($opt->{POLY_TRIM_PERCENTILE}) {
-	    my $n_trim = $opt->{POLY_TRIM_PERCENTILE}/100*$c2->dim(0);
-	    my $c3i = (-$c3)->qsorti;  # BAD gets sorted at the end; negative makes largest values first
-	    my $c3dex = ndcoords($c3i->(0:$n_trim));
-	    $c3dex->((0)) .= $c3i->(0:$n_trim);
-	    $c3->indexND($c3dex) .= $c3->badvalue;
+	    my $ptt = $opt->{POLY_TRIM_PERCENTILE};
+	    my $maxtrim = (ref($ptt) eq 'ARRAY') ? $ptt->[1] : $ptt;
+	    my $mintrim = (ref($ptt) eq 'ARRAY') ? $ptt->[0] : $ptt;
+	    my $rejrow = (ref($ptt) eq 'ARRAY') ? ($ptt->[2] // 0.1) : 0.1;
+	    
+	    my $c3i = $c3->qsorti;  # BAD gets sorted at the end
+	    my $idex = ndcoords($c3i);
+	    $idex->((0)) .= $c3i;
+	    my $c3_xf = $c3->indexND($idex);
 
-	    $c3i = $c3->qsorti; 
-	    $c3dex = ndcoords($c3i->(0:$n_trim));
-	    $c3dex->((0)) .= $c3i->(0:$n_trim);
-	    $c3->indexND($c3dex) .= $c3->badvalue;
+	    my $n_keep = (1 - $maxtrim/100) * $c3i->isgood->sumover->(*1);
+	    my $n_rej =  ($mintrim/100) * $c3i->isgood->sumover->(*1);
+
+	    my $badrow = ($n_keep - $n_rej) < $rejrow;
+
+	    $c3_xf->where((xvals($c3i) < $n_rej) | (xvals($c3i) >= $n_keep) | $badrow) .= $c3->badvalue;
+
 	} 
+
+
 	my $eps = 0;
 	print "c3 is ".join("x",$c3->dims)."\n";
-	our($ndeg, $r, $ierr, $a) = polyfit( xvals($c3->dim(0)), $c3, ones(float,$c3->dim(0)), $opt->{POLY_ORDER}, $eps );
+	our($ndeg, $r, $ierr, $a) = polyfit( xvals($c3->dim(0)), $c3, ones($c3->dim(0)), $opt->{POLY_ORDER}, $eps );
 	undef $ierr;
 	undef $a;
 	undef $ndeg;
+	$r->where($r->isbad) .= 0;
 	$cube->mv(2,0)->(:,:,$min:$max) -= $r;
     }
     print "\n";
 
     # accumulate minimum so as not to eat too much memory...
     print "Accumulating minimum....";
-    my $ones = ones(float, 1, $opt->{MIN_SMOOTH_SIZE});
+    my $ones = ones(1, $opt->{MIN_SMOOTH_SIZE});
     my $min = $cube->(:,:,(0))->med2d( $ones )->med2d($ones->mv(1,0))->(:,:,*2)->copy;
     for my $i(1..$cube->dim(2)-1) {
 	print "$i...";

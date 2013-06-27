@@ -110,7 +110,8 @@ sub hi1_pipeline {
 	MARK_BAD                => 0,     # Don't bother marking bad elements
 	BAD_DIL_FR              => 0,     # Items marked bad should not be dilated across frames
 	BAD_DIL_PIX             => 1.5,   # Dilate spatially by +/- 1.5 pixel (3 total)
-	
+
+	DIST_MIN_PCORR=>0.9,
 	DIST_CORRTIME           => 3,       # Use 3-day correlation
 	DIST_CORR_NSAMP		=> 40,      # 40 x 40 samples
 	DIST_CORR_RSIZE         => 35,      # 35 pixel radius for guesses
@@ -150,8 +151,9 @@ sub hi1_pipeline {
 	DEBUG_OUTPUT_PREFIX     => "tmp/",
 	CLEAN_MARGIN_FRAMES     => 2,
 
-	FINAL_POLY              => 1
-
+	FINAL_POLY              => 1,
+	POLY_TRIM_PERCENTILE=>[3,30,20],
+	
     };
 
     my $k;
