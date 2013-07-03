@@ -168,11 +168,29 @@ sub hi1_pipeline {
     ##############################
     # Read and filter files, and create the working hash.
     $hash = read_files($in_list,$opt);
+    movie_from_cube($hash->{RAW_CUBE},{fname=>"f-%3.3d.png",
+				       topt=>{size=>[9,8]},
+				       popt=>{j=>1,clut=>'sepia',cbr=>[0,1e-11]},
+				       title=>[ map { sprintf("HI-1 step 1: input - %s",
+							      $_->{'DATE-OBS'}) 
+						} @{$hash->{RAW_HDRS}} ],
+				       cores=>4,
+				       dir=>'01-input'
+		    })	if($opt->{PIPELINE_MOVIES});
 
     print "\n***\nAfter read_files: RAW_CUBE is ".join("x",$hash->{RAW_CUBE}->dims)."\n***\n\n";
 
     # Remove the F corona
     remove_f_corona($hash,$opt);
+    movie_from_cube($hash->{BKSUB_CUBE},{fname=>"f-%3.3d.png",
+				       topt=>{size=>[9,8]},
+				       popt=>{j=>1,clut=>'sepia',cbr=>[0,1e-12]},
+				       title=>[ map { sprintf("HI-1 step 2: f corona removed - %s",
+							      $_->{'DATE-OBS'}) 
+						} @{$hash->{RAW_HDRS}} ],
+				       cores=>4,
+				       dir=>'02-f_removed'
+		    })	if($opt->{PIPELINE_MOVIES});
 
     print "\n********\nAfter remove_f_corona: RAW_CUBE is ".join("x",$hash->{RAW_CUBE}->dims)."; BKSUB_CUBE is ".join("x",$hash->{BKSUB_CUBE}->dims)."\n********\n\n";
 
@@ -185,12 +203,31 @@ sub hi1_pipeline {
     # Resample to celestial coordinates
     print "shift_to_celestial...\n";
     shift_to_celestial($hash, $opt);      # nullify stellar drift
+    movie_from_cube($hash->{CEL_CUBE},{fname=>"f-%3.3d.png",
+				       topt=>{size=>[7,8]},
+				       popt=>{j=>1,clut=>'sepia',cbr=>[0,1e-12]},
+				       title=>[ map { sprintf("HI-1 step 3: celestial - %s",
+							      $_->{'DATE-OBS'}) 
+						} @{$hash->{RAW_HDRS}} ],
+				       cores=>4,
+				       dir=>'03-celestial'
+		    })	if($opt->{PIPELINE_MOVIES});
+
 
     delete $hash->{BKSUB_CUBE} unless($opt->{KEEP_DATA});
 
     # Null out the starfield
     print "null_stars...\n";
     null_stars($hash, $opt);              # try to cancel out the starfield
+    movie_from_cube($hash->{CEL_CUBE},{fname=>"f-%3.3d.png",
+				       topt=>{size=>[7,8]},
+				       popt=>{j=>1,clut=>'sepia',cbr=>[0,3e-13]},
+				       title=>[ map { sprintf("HI-1 step 4: nulled - %s",
+							      $_->{'DATE-OBS'}) 
+						} @{$hash->{RAW_HDRS}} ],
+				       cores=>4,
+				       dir=>'04-nulled'
+		    })	if($opt->{PIPELINE_MOVIES});
 
     my $datestr = time2str("%Y-%m-%dT%H:%M:%SZ",time,"Z");
 
@@ -199,6 +236,16 @@ sub hi1_pipeline {
 	print "Shift nulled data to instrument coords...\n";
 
 	shift_to_instrument($hash,$opt);
+	movie_from_cube($hash->{CLEAN_CUBE},{fname=>"f-%3.3d.png",
+					   topt=>{size=>[9,8]},
+					   popt=>{j=>1,clut=>'sepia',cbr=>[0,3e-13]},
+					   title=>[ map { sprintf("HI-1 step 5a: nulled (inst)- %s",
+								  $_->{'DATE-OBS'}) 
+						} @{$hash->{RAW_HDRS}} ],
+					       cores=>4,
+					       dir=>'05a-nulled'
+			})	if($opt->{PIPELINE_MOVIES});
+
 
 	$hash->{NULLED_CUBE} = $hash->{CLEAN_CUBE};
 	delete $hash->{CLEAN_CUBE};
@@ -208,6 +255,15 @@ sub hi1_pipeline {
 	    print "Removing polynomials from NULLED (S) cube...\n";
 	    remove_polynomials($hash, {%$opt, POLY_CUBE=>'NULLED', POLY_TRIM_PERCENTILE=>10 });
 	}
+	movie_from_cube($hash->{NULLED_CUBE},{fname=>"f-%3.3d.png",
+				       topt=>{size=>[9,8]},
+				       popt=>{j=>1,clut=>'sepia',cbr=>[0,2e-13]},
+				       title=>[ map { sprintf("HI-1 step 6a: final poly - %s",
+							      $_->{'DATE-OBS'}) 
+						} @{$hash->{RAW_HDRS}} ],
+				       cores=>4,
+				       dir=>'06a-poly'
+		    })	if($opt->{PIPELINE_MOVIES});
 
 
 	if($opt->{OUTPUT_FILES}) {
@@ -247,25 +303,74 @@ sub hi1_pipeline {
     # Attempt to find and remove telegraph pixels (stars/planets)
     print "Clean telegraph...\n";
     clean_telegraph($hash,$opt);
+    movie_from_cube($hash->{CEL_CUBE},{fname=>"f-%3.3d.png",
+					 topt=>{size=>[7,8]},
+					 popt=>{j=>1,clut=>'sepia',cbr=>[0,3e-13]},
+					 title=>[ map { sprintf("HI-1 step 5: telegraph - %s",
+								$_->{'DATE-OBS'}) 
+						  } @{$hash->{RAW_HDRS}} ],
+					     cores=>4,
+					     dir=>'05-telegraph'
+		    })	if($opt->{PIPELINE_MOVIES});
 
     ##############################
     # Apply the motion filter
     print "Motion filter...\n"; 
     motion_filter($hash,$opt);
+    movie_from_cube($hash->{CEL_CUBE},{fname=>"f-%3.3d.png",
+					 topt=>{size=>[7,8]},
+					 popt=>{j=>1,clut=>'sepia',cbr=>[0,2e-13]},
+					 title=>[ map { sprintf("HI-1 step 6: motion - %s",
+								$_->{'DATE-OBS'}) 
+						  } @{$hash->{RAW_HDRS}} ],
+					     cores=>4,
+					     dir=>'06-motion'
+		    })	if($opt->{PIPELINE_MOVIES});
     
     ##############################
     # Re-null to establish the zero point
     print "Second null...\n";
     null_stars($hash,$opt);
+    movie_from_cube($hash->{CEL_CUBE},{fname=>"f-%3.3d.png",
+					 topt=>{size=>[7,8]},
+					 popt=>{j=>1,clut=>'sepia',cbr=>[0,1.5e-13]},
+					 title=>[ map { sprintf("HI-1 step 7: final null - %s",
+								$_->{'DATE-OBS'}) 
+						  } @{$hash->{RAW_HDRS}} ],
+					     cores=>4,
+					     dir=>'07-null'
+		    })	if($opt->{PIPELINE_MOVIES});
+    
 
     ##############################
     # Shift back to instrument coordinates.
     print "Shift back to instrument...\n";
     shift_to_instrument($hash,$opt);
+    movie_from_cube($hash->{CLEAN_CUBE},{fname=>"f-%3.3d.png",
+					 topt=>{size=>[9,8]},
+					 popt=>{j=>1,clut=>'sepia',cbr=>[0,1.5e-13]},
+					 title=>[ map { sprintf("HI-1 step 8: inst - %s",
+								$_->{'DATE-OBS'}) 
+						  } @{$hash->{RAW_HDRS}} ],
+					     cores=>4,
+					     dir=>'08-inst'
+		    })	if($opt->{PIPELINE_MOVIES});
+    
 
     if($opt->{FINAL_POLY}) {
 	print "Removing polynomials...\n";
 	remove_polynomials($hash, {%$opt, POLY_CUBE=>'CLEAN'});
+	movie_from_cube($hash->{CLEAN_CUBE},{fname=>"f-%3.3d.png",
+					     topt=>{size=>[9,8]},
+					     popt=>{j=>1,clut=>'sepia',cbr=>[0,1.5e-13]},
+					     title=>[ map { sprintf("HI-1 step 9: final polynomial - %s",
+								    $_->{'DATE-OBS'}) 
+						      } @{$hash->{RAW_HDRS}} ],
+						 cores=>4,
+						 dir=>'09-polynomial'
+			})	if($opt->{PIPELINE_MOVIES});
+    
+
     }
 
     # Dump output to files...

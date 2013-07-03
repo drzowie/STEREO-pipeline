@@ -16,6 +16,8 @@ options:
 
 =item cores - defaults to 4; if 0, no multitasking.
 
+=item dir - defaults to '.'.  Gets autocreated if necessary.
+
 =back
 
 =cut
@@ -32,8 +34,10 @@ sub movie_from_cube {
 	term    =>  "png",
 	topt    => {size=>[8,8],enhanced=>1},
 	popt    => {clut=>'sepia',j=>1,globalwith=>'image'},
-	cores   => 4
+	cores   => 4,
+	dir     => '.'
     };
+
     for my $k(keys %$defaults) {
 	unless(ref $defaults->{$k} eq 'HASH') {
 	    unless( exists( $opt->{$k} ) ) {
@@ -51,11 +55,15 @@ sub movie_from_cube {
 	    }
 	}
     }
+
+    if( ($opt->{dir}) and ($opt->{dir} ne '.' ) ) {
+     `mkdir $opt->{dir}`;
+    }
     
     my $sub = sub {
 	my $i = $_[0];
 	my %topt = %{$opt->{topt}};
-	$topt{output} = sprintf($opt->{fname},$i);
+	$topt{output} = $opt->{dir} . (length($opt->{dir}) ? "/" : "") . sprintf($opt->{fname},$i);
 
 	my $title;
 	if(defined($opt->{title})) {

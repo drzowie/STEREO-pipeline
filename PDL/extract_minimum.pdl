@@ -1,0 +1,105 @@
+=head2 extract_minimum - find (near-) local minimum images in data cubes
+
+=for usage 
+
+ $out = extract_minimum($in, $opt);
+
+=for ref
+
+Accepted options are:
+
+=over 3
+
+=item n_min (default 0) - find the nth minimum value, rather than the minimum value
+
+=item reach (default Empty) - reach <n> elements away in each dimension other than the 0th
+
+=back
+
+=cut
+use PDL::NiceSlice;
+
+sub extract_minimum {
+    my $in = shift;
+    my $opt = shift;
+
+    my $opt_defaults = {
+	n_min => 0,
+	reach => PDL->new_from_specification(0)
+    };
+
+    for $k(keys %$opt_defaults) {
+	$opt->{$k} = $opt_defaults->{$k} unless(exists($opt->{$k}));
+    }
+
+
+    my $reach = pdl($opt->{reach})->(:);
+    my $n_min = pdl($opt->{n_min});
+
+    die "extract_minimum: n_min must be a scalar value" unless($n_min->nelem != 1);
+    die "extract_minimum: n_min is larger than dim 0 of input" unless($n_min <= $in->dim(0));
+
+    die "extract_minimum: reach must be a scalar or 1-d value" unless($reach->ndims==1);
+    die "extract_minimum: too much reach" if($reach->nelem > $in->ndims-1);
+
+    my $min_cache = PDL->new_from_specification($n_min->at(0)+1);
+    my $reach_vec = PDL->new_from_specification($reach->nelem);
+
+    my $out = PDL::extract_minimum_helper( $in, $reach, $min_cache, $reach_vec );
+
+
+    return $out;
+}
+
+
+no PDL::NiceSlice;
+use Inline Config => CLEAN_AFTER_BUILD => 0;
+use Inline Pdlpp=> <<'EOF';
+
+pp_def('extract_minimum_helper',
+       Pars => 'in(n);reach(foo);min_cache(bar);vec(baz);out()[o]',
+       HandleBad=>0,
+       Code => q{
+       int ii,jj;
+       pdl *inpdl = $PDL(in);
+       int cache_maxdex = 0;
+
+       /* Initialize minimum cache... */
+       for(ii=0; ii<$SIZE(bar); ii++) {
+	   $min_cache(bar=>ii) = $in(n=>ii);
+	   if( $min_cache(bar=>ii) > $min_cache(bar=>cache_maxdex) ) {
+	       cache_maxdex = ii;
+	   }
+       }
+
+       /* Accumulate minimum across n... */
+       for( ii=0; ii<$SIZE(n); ii++ ) {
+
+	   /* Check if the current value is smaller than the largest element of the cache. */
+	   /* If it is, put it in the cache, and then update the cache maxdex              */
+	   if( $in(n=>ii) < $min_cache(bar=>cache_maxdex) ) {
+	       $min_cache(bar=>cache_maxdex) = $in(n=>ii);
+
+	       for( jj=0; jj<$SIZE(bar); jj++ ) {
+		   if($min_cache(bar=>jj) > $min_cache(bar=>cache_maxdex)) {
+		       cache_maxdex = jj;
+		   }
+	       }
+           }
+       }
+       
+       $out() = $min_cache(bar=>cache_maxdex);
+    }
+    );
+
+
+EOF
+
+       
+       
+       
+
+       
+       
+       
+       
