@@ -15,17 +15,29 @@ sub hi2_pipeline {
     my $in_list = shift;
     my $opt = shift;
 
-    $opt->{OUTPUT_DIR} = "processed" unless exists($opt->{OUTPUT_DIR});
-    $opt->{OUTPUT_FILES} = 1 unless exists ($opt->{OUTPUT_FILES});
-    $opt->{DEBUG_OUTPUT_PREFIX} = "" unless exists($opt->{DEBUG_OUTPUT_PREFIX});
-    $opt->{DEBUG_OUTPUT_PREFIX} .= "-" if($opt->{DEBUG_OUTPUT_PREFIX} && $opt->{DEBUG_OUTPUT_PREFIX} !~ m/[^\/\-]$/);
-    $opt->{FINAL_POLY_STEP} = 0 unless exists($opt->{FINAL_POLY_STEP});
-    $opt->{FINAL_ZERO_STEP} = 0 unless exists($opt->{FINAL_ZERO_STEP});
+    my $opt_defaults = {
+	OUTPUT_DIR    => 'processed',
+	OUTPUT_FILES  => 1,
+	KEEP_DATA     => 0, 
 
+	FILE_STATUS_DB => 0,
+	REJECT_BY_PATCH => 0,
 
-    $opt->{DIST_MIN_PCORR} = 0.9 unless exists($opt->{DIST_MIN_PCORR});
-    $opt->{DIST_CORRTIME}  = 5   unless exists($opt->{DIST_CORRTIME});
-    $opt->{DIST_CORR_RSIZE}= 10  unless exists($opt->{DIST_CORR_RSIZE});
+	F_POLYNOMIAL => 0,
+	F_MINI => 0,
+	
+	DEBUG_OUTPUT_PREFIX => "",
+	FINAL_POLY_STEP => 0,
+	FINAL_ZERO_STEP => 0,
+	
+	DIST_MIN_PCORR => 0.9,
+	DIST_CORRTIME => 5,
+	DIST_CORR_RSIZE => 10
+    };
+
+    for my $k(keys %{$opt_defaults}) {
+	$opt->{$k} = $opt_defaults->{$k} unless(exists($opt->{$k}));
+    }
 
     print "hi2_pipeline: opt is:\n";
     for(sort keys %$opt) {
