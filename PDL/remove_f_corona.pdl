@@ -87,7 +87,7 @@ sub  remove_f_corona {
      # Set default values for options
      $opt->{'neg'}    = "bad"  unless( exists( $opt->{'neg'}  )  ); # how to handle negative values
      $opt->{'pct'}    = 5      unless( exists( $opt->{'pct'}  )  ); # percentile for background
-     $opt->{'sm'}     = [7,30] unless( exists( $opt->{'sm'}   )  ); # smoothing of background
+     $opt->{'sm'}     = 1      unless( exists( $opt->{'sm'}   )  ); # no smoothing of background by default
      $opt->{'bin'}    = 0      unless( exists( $opt->{'bin'}  )  ); # whether to deal with multiply binned full-frame images
      $opt->{'MASK_THRESH'} = 500 unless( exists($opt->{'MASK_THRESH'}) );
      $opt->{'MASK_RADIUS'} = 500 unless(exists($opt->{'MASK_RADIUS'}));
@@ -99,11 +99,11 @@ sub  remove_f_corona {
      $opt->{'BAD_DIL_PIX'} = 1 unless(exists($opt->{'BAD_DIL_PIX'}));
      $opt->{'BAD_DIL_FR'} = 0 unless(exists($opt->{'BAD_DIL_FR'}));
      $opt->{'F_POLYNOMIAL'} = 3 unless(exists($opt->{'F_POLYNOMIAL'}));
-     $opt->{'F_MINI'} = 40      unless(exists($opt->{'F_MINI'}));
-     $opt->{'F_MINI_SKIP'} = 2      unless(exists($opt->{'F_MINI_SKIP'}));
-     $opt->{'F_MINI_PCT'} = 2      unless(exists($opt->{'F_MINI_PCT'}));
-     $opt->{'F_POLY_APERTURE'} = 5 unless(exists($opt->{'F_POLY_APERTURE'}));
-     $opt->{'F_POLY_SKIP'} = 7 unless(exists($opt->{'F_POLY_SKIP'}));
+     $opt->{'F_MINI'} = 20      unless(exists($opt->{'F_MINI'}));
+     $opt->{'F_MINI_SKIP'} = 1      unless(exists($opt->{'F_MINI_SKIP'}));
+     $opt->{'F_MINI_PCT'} = 5      unless(exists($opt->{'F_MINI_PCT'}));  #5
+     $opt->{'F_POLY_APERTURE'} = 1 unless(exists($opt->{'F_POLY_APERTURE'}));  # 21
+     $opt->{'F_POLY_SKIP'} = 3 unless(exists($opt->{'F_POLY_SKIP'}));
 
      # Make sure we have a data cube in usable form
      if( ref($in) !~ m/HASH/ ) {
@@ -114,31 +114,11 @@ sub  remove_f_corona {
 
      my $ims = $in->{RAW_CUBE};
 
-
-
-     
-     ##############################
-     # Sort the cube by value to find a percentile image
-     my $sorted = $ims->mv(-1,0)->qsort->sever;
-
      ##############################
      # Find the index of the closest value to the desired percentile
-     my $sn = $sorted->dim(0) * ($opt->{'pct'}/100) + 0.5;
-     # Take the percentile and smooth as necessary
-
-     my $bk;
-     if(ref($opt->{'sm'}) eq 'ARRAY') {
-	 my $smsiz= $opt->{'sm'}->[0];
-	 my $smpct = $opt->{'sm'}->[1];
-	 my $smdex = ($smsiz * $smsiz)  * ($smpct /100) + 0.5;
-	 $bk = $sorted
-	     ->(($sn))
-	     ->range(  ndcoords($smsiz,$smsiz)->clump(1,2)-3,  [$sorted->(($sn))->dims],  'e')
-	     ->qsort
-	     ->(($smdex));
-     } else {
-	 $bk = $sorted->(($sn));
-     }
+     my $sn = $ims->dim(2) * ($opt->{'pct'}/100) + 0.5;
+     my $sm = $opt->{'sm'} || 1;
+     my $bk = extract_minimum($ims, {n_min => $sn, reach=> ($sm-1)/2 });
 
      my $out = $in;
      $out->{FBK} = $bk if($opt->{KEEP_FCORONA});
@@ -151,7 +131,10 @@ sub  remove_f_corona {
      if($opt->{F_MINI}) {
 	 my @mini_mins;
 	 my @mini_x;
-	 my $ims = $out->{BKSUB_CUBE};
+
+	 our($mini_mins, $mini_x, $mmm, $mmv, $mmvm, $weight, $ims);
+
+	 $ims = $out->{BKSUB_CUBE};
 
 	 my $n = 1.5 * pdl(($ims->dim(2)) / $opt->{F_MINI} )->ceil ;
 
@@ -160,37 +143,56 @@ sub  remove_f_corona {
 	     print " $i";
 	     my $min = ($i * ($ims->dim(2) - $opt->{F_MINI} - 1) / $n)->floor;
 	     my $max = ($min + $opt->{F_MINI} - 1)->ceil;
+	     print "min is $min; max is $max\n";
 	     my $sk = $opt->{F_MINI_SKIP} || 1;
-	     my $subblock = $ims->(:,:,$min:$max:$sk)->mv(2,0);
+	     my $subblock = $ims->(:,:,$min:$max:$sk)->sever;
 
-	     print ".";
-	     my $ap = $opt->{'F_POLY_APERTURE'};
-	     my $lag = (ndcoords(1,$ap,$ap)->(:,(0))->clump(1,2) - ($ap-1)/2) * ($opt->{F_POLY_SKIP} || 1);
-	     my $laggy = $subblock->range($lag,[$subblock->dims],'e')->clump(2)->sever;
-	     print ".";
-	     $laggy->inplace->qsort;
-	     print ".";
-	     
-	     my $dex = $laggy->dim(0) * $opt->{'F_MINI_PCT'} / 100;
-	     push(@mini_mins,$laggy->( ($dex) )->med2d(ones(5,5)));
+	     my $ap = ($opt->{F_POLY_APERTURE}-1) / 2;
+	     print "ap is $ap, skip is $opt->{F_MINI_PCT}\n";
+	     my $dex = $subblock->dim(2) * $ap * $ap / $opt->{F_POLY_SKIP} / $opt->{F_POLY_SKIP} * $opt->{'F_MINI_PCT'} / 100;
+	     print "dex=$dex";
+	     push(@mini_mins, extract_minimum($subblock, {n_min=>$dex, reach=>$ap, rstep=>$opt->{F_POLY_SKIP}}));
+	     print "$i of $n!\n";
 	     push(@mini_x,($min+$max)/2);
 	 }
 
-	 my($mini_mins) = pdl(@mini_mins)->mv(-1,0)->sever;
-	 my($mini_x) = pdl(@mini_x)->mv(-1,0)->sever->(:,*($mini_mins->dim(1)),*($mini_mins->dim(2)));
+
+
+	 $mini_mins = pdl(@mini_mins)->mv(-1,0)->sever;
+	 $mini_x = pdl(@mini_x)->mv(-1,0)->sever->(:,*($mini_mins->dim(1)),*($mini_mins->dim(2)));
+
+
+	 ##########
+	 # Now generate the weighting function.  We find the median of mini_mins, and 
+	 # discard anything too far from it.
+	 #
+	 # A bug in Slatec is triggered when a point weight is zero, so we set "zero" weights
+	 # to something merely small.  This could be an issue with bad values, except that we
+	 # should have discarded them a long time ago.
+	 $mmm = $mini_mins->medover->(*1);
+	 $mmv = ($mini_mins-$mmm)->abs;
+	 $mmvm = $mmv->average->(*1);
+	 
+	 $weight = ($mmv < $mmvm*2) + 1e-20;
+	 
+	 print "mini_mins is ",join("x",$mini_mins->dims),"\n";
 
 	 my $coeffs = polyfit($mini_x, 
 			      $mini_mins, 
-			      pdl(1)->(*($mini_x->dim(0)),*($mini_x->dim(1)),*($mini_x->dim(2))), 
-			      3, 0);
+			      $weight,
+			      $opt->{F_POLYNOMIAL}, 0);
+
 
 	 my($xv) = xvals($ims->dim(2));
-	 my($bkg) = $coeffs->(*1,(3))->copy * $xv;
-	 $bkg += $coeffs->(*1,(2));
-	 $bkg *= $xv;
-	 $bkg += $coeffs->(*1,(1));
-	 $bkg *= $xv;
-	 $bkg += $coeffs->(*1,(0));
+
+	 print "coeffs is ",join('x',$coeffs->dims),"\n";
+
+	 my($bkg) = $coeffs->(*1,(-1))->copy;
+	 my($ii);
+	 for($ii=$coeffs->dim(0)-2; $ii >= 0; $ii--) {
+	     $bkg *= $xv;
+	     $bkg += $coeffs->(*1,($i));
+	 }
 
 	 $out->{BKSUB_CUBE} -= $bkg->mv(0,2);
      }

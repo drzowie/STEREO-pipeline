@@ -317,8 +317,10 @@ sub read_files {
 	    if($mask->sum < $mask->nelem) {
 		print "read_files: CROTA filter rejected frames ";
 		for my $i(0..$#{$in->{RAW_HDRS}}){
-		    print "$i ";
-		    $status[$i] = 'CROTA' unless($mask);
+		    unless($mask->(($i))) {
+			print "$i ";
+			$status[$i] = 'CROTA';
+		    }
 		}
 		print "\n";
 	    }

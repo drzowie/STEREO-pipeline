@@ -1,4 +1,4 @@
-=head2 extract_minimum - find (near-) local minimum images in data cubes
+=head2 extract_minimum - find (near-) local minimum images in data cubes for STEREO
 
 =for usage 
 
@@ -6,13 +6,17 @@
 
 =for ref
 
+This special-purpose PP code finds near-local-minimum values with neighborhood checking
+along time series of images, with time in the 0 dimension.  You must feed in 3 dims:
+x,y,t.  You get back 2 dims:  x,y.
+
 Accepted options are:
 
 =over 3
 
 =item n_min (default 0) - find the nth minimum value, rather than the minimum value
 
-=item reach (default Empty) - reach <n> elements away in each dimension other than the 0th
+=item reach (default 0) - reach <n> elements away in each dimension other than the 0th.
 
 =back
 
@@ -25,7 +29,8 @@ sub extract_minimum {
 
     my $opt_defaults = {
 	n_min => 0,
-	reach => PDL->new_from_specification(0)
+	reach => 0,
+	rstep => 1
     };
 
     for $k(keys %$opt_defaults) {
@@ -33,19 +38,17 @@ sub extract_minimum {
     }
 
 
-    my $reach = pdl($opt->{reach})->(:);
+    my $reach = pdl($opt->{reach});
+    my $rstep = pdl($opt->{rstep});
     my $n_min = pdl($opt->{n_min});
 
-    die "extract_minimum: n_min must be a scalar value" unless($n_min->nelem != 1);
-    die "extract_minimum: n_min is larger than dim 0 of input" unless($n_min <= $in->dim(0));
-
-    die "extract_minimum: reach must be a scalar or 1-d value" unless($reach->ndims==1);
-    die "extract_minimum: too much reach" if($reach->nelem > $in->ndims-1);
+    die "extract_minimum: n_min must be a scalar value" unless($n_min->nelem == 1);
+    die "extract_minimum: reach must be a scalar" unless($reach->nelem == 1);
+    die "extract_minimum: rstep must be a nonzero scalar" if($rstep->nelem != 1  or  $rstep==0);
 
     my $min_cache = PDL->new_from_specification($n_min->at(0)+1);
-    my $reach_vec = PDL->new_from_specification($reach->nelem);
 
-    my $out = PDL::extract_minimum_helper( $in, $reach, $min_cache, $reach_vec );
+    my $out = PDL::extract_minimum_helper( $in, $reach, $rstep, $min_cache );
 
 
     return $out;
@@ -53,43 +56,67 @@ sub extract_minimum {
 
 
 no PDL::NiceSlice;
-use Inline Config => CLEAN_AFTER_BUILD => 0;
+use Inline Config => CLEAN_AFTER_BUILD => 1;
 use Inline Pdlpp=> <<'EOF';
 
 pp_def('extract_minimum_helper',
-       Pars => 'in(n);reach(foo);min_cache(bar);vec(baz);out()[o]',
+       Pars => 'in(nn,nnn,n);reach();rstep();min_cache(bar);[o]out(nn,nnn)',
        HandleBad=>0,
        Code => q{
-       int ii,jj;
+       int ii,jj,kk,jjr,kkr;
        pdl *inpdl = $PDL(in);
-       int cache_maxdex = 0;
 
-       /* Initialize minimum cache... */
-       for(ii=0; ii<$SIZE(bar); ii++) {
-	   $min_cache(bar=>ii) = $in(n=>ii);
-	   if( $min_cache(bar=>ii) > $min_cache(bar=>cache_maxdex) ) {
-	       cache_maxdex = ii;
+       /* Simple threadloop over an image */
+       for(kk=0; kk<$SIZE(nnn); kk++) {
+       	 for(jj=0; jj<$SIZE(nn); jj++) {
+	   int okflag;
+	   int cache_maxdex = 0;
+
+	   if( (okflag = ((kk*$SIZE(nn)+jj) % 1000 == 0)) ) {
+	     printf("."); fflush(stdout);
 	   }
-       }
+ 
+	   /* Initialize minimum cache... */
+	   for(ii=0; ii<$SIZE(bar); ii++) {
+	     int idex = (ii<$SIZE(n)) ? ii : ($SIZE(n)-1) ;
+	     $min_cache(bar=>ii) = $in(n=>idex,nn=>jj,nnn=>kk);
+	     if( $min_cache(bar=>ii) > $min_cache(bar=>cache_maxdex) ) {
+	       cache_maxdex = ii;
+	     }
+	   }
 
-       /* Accumulate minimum across n... */
-       for( ii=0; ii<$SIZE(n); ii++ ) {
 
-	   /* Check if the current value is smaller than the largest element of the cache. */
-	   /* If it is, put it in the cache, and then update the cache maxdex              */
-	   if( $in(n=>ii) < $min_cache(bar=>cache_maxdex) ) {
-	       $min_cache(bar=>cache_maxdex) = $in(n=>ii);
+	   /* Accumulate minimum across n... */
+	   for( ii=0; ii<$SIZE(n); ii++ ) {
+	     for( kkr = -$reach(); kkr <= $reach(); kkr+=$rstep()) {
+	       for( jjr = -$reach(); jjr <= $reach(); jjr+=$rstep()) {
+		 
+		 int kks = kk + kkr;
+		 int jjs = jj + jjr;
+		 
+		 if(kks >= 0 && jjs >= 0 && kks < $SIZE(nnn) && jjs < $SIZE(nn)) {
 
-	       for( jj=0; jj<$SIZE(bar); jj++ ) {
-		   if($min_cache(bar=>jj) > $min_cache(bar=>cache_maxdex)) {
-		       cache_maxdex = jj;
+		   /* Check if the current value is smaller than the largest element of the cache. */
+		   /* If it is, put it in the cache, and then update the cache maxdex.             */
+		   $GENERIC() inval = $in(n=>ii, nn=>jjs, nnn=>kks);
+		   if( inval < $min_cache(bar=>cache_maxdex) ) {
+		     int ijk;
+		     $min_cache(bar=>cache_maxdex) = inval;
+		     for( ijk=0; ijk<$SIZE(bar); ijk++ ) {
+		       if($min_cache(bar=>ijk) > $min_cache(bar=>cache_maxdex)) {
+			 cache_maxdex = ijk;
+		       }
+		     }
 		   }
+		 }
 	       }
-           }
+	     }
+	   }
+	   
+	   $out(nn=>jj, nnn=>kk) = $min_cache(bar=>cache_maxdex);
+	 }
        }
-       
-       $out() = $min_cache(bar=>cache_maxdex);
-    }
+       }
     );
 
 

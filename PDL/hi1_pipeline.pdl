@@ -109,7 +109,7 @@ sub hi1_pipeline {
 	MASK_RADIUS             => 0,     # No radial masking
 	MARK_BAD                => 0,     # Don't bother marking bad elements
 	BAD_DIL_FR              => 0,     # Items marked bad should not be dilated across frames
-	BAD_DIL_PIX             => 1.5,   # Dilate spatially by +/- 1.5 pixel (3 total)
+	BAD_DIL_PIX             => 2,   # Dilate spatially by +/- 1.5 pixel (5 total)
 
 	DIST_MIN_PCORR=>0.9,
 	DIST_CORRTIME           => 3,       # Use 3-day correlation
@@ -169,7 +169,7 @@ sub hi1_pipeline {
     # Read and filter files, and create the working hash.
     $hash = read_files($in_list,$opt);
     movie_from_cube($hash->{RAW_CUBE},{fname=>"f-%3.3d.png",
-				       topt=>{size=>[9,8]},
+				       topt=>{size=>[14,11]},
 				       popt=>{j=>1,clut=>'sepia',cbr=>[0,1e-11]},
 				       title=>[ map { sprintf("HI-1 step 1: input - %s",
 							      $_->{'DATE-OBS'}) 
@@ -183,7 +183,7 @@ sub hi1_pipeline {
     # Remove the F corona
     remove_f_corona($hash,$opt);
     movie_from_cube($hash->{BKSUB_CUBE},{fname=>"f-%3.3d.png",
-				       topt=>{size=>[9,8]},
+				       topt=>{size=>[14,11]},
 				       popt=>{j=>1,clut=>'sepia',cbr=>[0,1e-12]},
 				       title=>[ map { sprintf("HI-1 step 2: f corona removed - %s",
 							      $_->{'DATE-OBS'}) 
@@ -204,7 +204,7 @@ sub hi1_pipeline {
     print "shift_to_celestial...\n";
     shift_to_celestial($hash, $opt);      # nullify stellar drift
     movie_from_cube($hash->{CEL_CUBE},{fname=>"f-%3.3d.png",
-				       topt=>{size=>[7,8]},
+				       topt=>{size=>[10,11]},
 				       popt=>{j=>1,clut=>'sepia',cbr=>[0,1e-12]},
 				       title=>[ map { sprintf("HI-1 step 3: celestial - %s",
 							      $_->{'DATE-OBS'}) 
@@ -220,7 +220,7 @@ sub hi1_pipeline {
     print "null_stars...\n";
     null_stars($hash, $opt);              # try to cancel out the starfield
     movie_from_cube($hash->{CEL_CUBE},{fname=>"f-%3.3d.png",
-				       topt=>{size=>[7,8]},
+				       topt=>{size=>[10,11]},
 				       popt=>{j=>1,clut=>'sepia',cbr=>[0,3e-13]},
 				       title=>[ map { sprintf("HI-1 step 4: nulled - %s",
 							      $_->{'DATE-OBS'}) 
@@ -237,7 +237,7 @@ sub hi1_pipeline {
 
 	shift_to_instrument($hash,$opt);
 	movie_from_cube($hash->{CLEAN_CUBE},{fname=>"f-%3.3d.png",
-					   topt=>{size=>[9,8]},
+					   topt=>{size=>[14,11]},
 					   popt=>{j=>1,clut=>'sepia',cbr=>[0,3e-13]},
 					   title=>[ map { sprintf("HI-1 step 5a: nulled (inst)- %s",
 								  $_->{'DATE-OBS'}) 
@@ -256,7 +256,7 @@ sub hi1_pipeline {
 	    remove_polynomials($hash, {%$opt, POLY_CUBE=>'NULLED', POLY_TRIM_PERCENTILE=>10 });
 	}
 	movie_from_cube($hash->{NULLED_CUBE},{fname=>"f-%3.3d.png",
-				       topt=>{size=>[9,8]},
+				       topt=>{size=>[14,11]},
 				       popt=>{j=>1,clut=>'sepia',cbr=>[0,2e-13]},
 				       title=>[ map { sprintf("HI-1 step 6a: final poly - %s",
 							      $_->{'DATE-OBS'}) 
@@ -304,7 +304,7 @@ sub hi1_pipeline {
     print "Clean telegraph...\n";
     clean_telegraph($hash,$opt);
     movie_from_cube($hash->{CEL_CUBE},{fname=>"f-%3.3d.png",
-					 topt=>{size=>[7,8]},
+					 topt=>{size=>[10,11]},
 					 popt=>{j=>1,clut=>'sepia',cbr=>[0,3e-13]},
 					 title=>[ map { sprintf("HI-1 step 5: telegraph - %s",
 								$_->{'DATE-OBS'}) 
@@ -318,7 +318,7 @@ sub hi1_pipeline {
     print "Motion filter...\n"; 
     motion_filter($hash,$opt);
     movie_from_cube($hash->{CEL_CUBE},{fname=>"f-%3.3d.png",
-					 topt=>{size=>[7,8]},
+					 topt=>{size=>[10,11]},
 					 popt=>{j=>1,clut=>'sepia',cbr=>[0,2e-13]},
 					 title=>[ map { sprintf("HI-1 step 6: motion - %s",
 								$_->{'DATE-OBS'}) 
@@ -332,7 +332,7 @@ sub hi1_pipeline {
     print "Second null...\n";
     null_stars($hash,$opt);
     movie_from_cube($hash->{CEL_CUBE},{fname=>"f-%3.3d.png",
-					 topt=>{size=>[7,8]},
+					 topt=>{size=>[10,11]},
 					 popt=>{j=>1,clut=>'sepia',cbr=>[0,1.5e-13]},
 					 title=>[ map { sprintf("HI-1 step 7: final null - %s",
 								$_->{'DATE-OBS'}) 
@@ -347,7 +347,7 @@ sub hi1_pipeline {
     print "Shift back to instrument...\n";
     shift_to_instrument($hash,$opt);
     movie_from_cube($hash->{CLEAN_CUBE},{fname=>"f-%3.3d.png",
-					 topt=>{size=>[9,8]},
+					 topt=>{size=>[10,11]},
 					 popt=>{j=>1,clut=>'sepia',cbr=>[0,1.5e-13]},
 					 title=>[ map { sprintf("HI-1 step 8: inst - %s",
 								$_->{'DATE-OBS'}) 
@@ -361,7 +361,7 @@ sub hi1_pipeline {
 	print "Removing polynomials...\n";
 	remove_polynomials($hash, {%$opt, POLY_CUBE=>'CLEAN'});
 	movie_from_cube($hash->{CLEAN_CUBE},{fname=>"f-%3.3d.png",
-					     topt=>{size=>[9,8]},
+					     topt=>{size=>[10,11]},
 					     popt=>{j=>1,clut=>'sepia',cbr=>[0,1.5e-13]},
 					     title=>[ map { sprintf("HI-1 step 9: final polynomial - %s",
 								    $_->{'DATE-OBS'}) 
