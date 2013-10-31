@@ -74,7 +74,7 @@ helpful in normal use.
 use PDL::NiceSlice;
 use PDL::Transform;
 use PDL::Bad;
-sub  remove_f_corona {
+sub remove_f_corona {
      local($PDL::BIGPDL) = 1;
      my $VERSION = "2.2 28-Jun-2013";
      my $i;
@@ -85,30 +85,26 @@ sub  remove_f_corona {
      $opt = {} unless defined($opt);
 
      # Set default values for options
-     $opt->{'neg'}    = "bad"  unless( exists( $opt->{'neg'}  )  ); # how to handle negative values
      $opt->{'pct'}    = 5      unless( exists( $opt->{'pct'}  )  ); # percentile for background
      $opt->{'sm'}     = 1      unless( exists( $opt->{'sm'}   )  ); # no smoothing of background by default
-     $opt->{'bin'}    = 0      unless( exists( $opt->{'bin'}  )  ); # whether to deal with multiply binned full-frame images
-     $opt->{'MASK_THRESH'} = 500 unless( exists($opt->{'MASK_THRESH'}) );
-     $opt->{'MASK_RADIUS'} = 500 unless(exists($opt->{'MASK_RADIUS'}));
-     $opt->{'MARK_BAD'} = 1 unless(exists($opt->{'MARK_BAD'}));
-     $opt->{'IMG_SIZE'} = 1024 unless(exists($opt->{'IMG_SIZE'}));
-     $opt->{'REJECT_BY_SUM'} = 0.03 unless(exists($opt->{'REJECT_BY_SUM'})); 
-     $opt->{'REJECT_BY_CROTA'} = 2 unless(exists($opt->{'REJECT_BY_CROTA'}));
-     $opt->{'CLEAN_BAD'} = 1 unless(exists($opt->{'CLEAN_BAD'}));
-     $opt->{'BAD_DIL_PIX'} = 1 unless(exists($opt->{'BAD_DIL_PIX'}));
-     $opt->{'BAD_DIL_FR'} = 0 unless(exists($opt->{'BAD_DIL_FR'}));
-     $opt->{'F_POLYNOMIAL'} = 3 unless(exists($opt->{'F_POLYNOMIAL'}));
-     $opt->{'F_MINI'} = 20      unless(exists($opt->{'F_MINI'}));
-     $opt->{'F_MINI_SKIP'} = 1      unless(exists($opt->{'F_MINI_SKIP'}));
-     $opt->{'F_MINI_PCT'} = 5      unless(exists($opt->{'F_MINI_PCT'}));  #5
-     $opt->{'F_POLY_APERTURE'} = 1 unless(exists($opt->{'F_POLY_APERTURE'}));  # 21
-     $opt->{'F_POLY_SKIP'} = 3 unless(exists($opt->{'F_POLY_SKIP'}));
+     $opt->{'neg'}    = "bad"  unless( exists( $opt->{'neg'}  )  ); # how to handle negative values
+
 
      # Make sure we have a data cube in usable form
      if( ref($in) !~ m/HASH/ ) {
 	 # Legacy for old calling convention - jump down into read_files unless
 	 # we have a batch hash.
+	 $opt->{'bin'}    = 0      unless( exists( $opt->{'bin'}  )  ); # whether to deal with multiply binned full-frame images
+	 $opt->{'MASK_THRESH'} = 500 unless( exists($opt->{'MASK_THRESH'}) );
+	 $opt->{'MASK_RADIUS'} = 500 unless(exists($opt->{'MASK_RADIUS'}));
+	 $opt->{'MARK_BAD'} = 1 unless(exists($opt->{'MARK_BAD'}));
+	 $opt->{'IMG_SIZE'} = 1024 unless(exists($opt->{'IMG_SIZE'}));
+	 $opt->{'REJECT_BY_SUM'} = 0.03 unless(exists($opt->{'REJECT_BY_SUM'})); 
+	 $opt->{'REJECT_BY_CROTA'} = 2 unless(exists($opt->{'REJECT_BY_CROTA'}));
+	 $opt->{'CLEAN_BAD'} = 1 unless(exists($opt->{'CLEAN_BAD'}));
+	 $opt->{'BAD_DIL_PIX'} = 1 unless(exists($opt->{'BAD_DIL_PIX'}));
+	 $opt->{'BAD_DIL_FR'} = 0 unless(exists($opt->{'BAD_DIL_FR'}));
+	 
 	 $in = read_files($in,$opt);
      }
 
@@ -125,78 +121,6 @@ sub  remove_f_corona {
      $out->{BKSUB_CUBE} = $ims - $bk;
      undef $ims;
      undef $bk;
-
-     ##############################
-     # Do polynomial f-corona removal if requested
-     if($opt->{F_MINI}) {
-	 my @mini_mins;
-	 my @mini_x;
-
-	 our($mini_mins, $mini_x, $mmm, $mmv, $mmvm, $weight, $ims);
-
-	 $ims = $out->{BKSUB_CUBE};
-
-	 my $n = 1.5 * pdl(($ims->dim(2)) / $opt->{F_MINI} )->ceil ;
-
-	 print "Generating min-minima...";
-	 for my $i(0..$n-1) {
-	     print " $i";
-	     my $min = ($i * ($ims->dim(2) - $opt->{F_MINI} - 1) / $n)->floor;
-	     my $max = ($min + $opt->{F_MINI} - 1)->ceil;
-	     print "min is $min; max is $max\n";
-	     my $sk = $opt->{F_MINI_SKIP} || 1;
-	     my $subblock = $ims->(:,:,$min:$max:$sk)->sever;
-
-	     my $ap = ($opt->{F_POLY_APERTURE}-1) / 2;
-	     print "ap is $ap, skip is $opt->{F_MINI_PCT}\n";
-	     my $dex = $subblock->dim(2) * $ap * $ap / $opt->{F_POLY_SKIP} / $opt->{F_POLY_SKIP} * $opt->{'F_MINI_PCT'} / 100;
-	     print "dex=$dex";
-	     push(@mini_mins, extract_minimum($subblock, {n_min=>$dex, reach=>$ap, rstep=>$opt->{F_POLY_SKIP}}));
-	     print "$i of $n!\n";
-	     push(@mini_x,($min+$max)/2);
-	 }
-
-
-
-	 $mini_mins = pdl(@mini_mins)->mv(-1,0)->sever;
-	 $mini_x = pdl(@mini_x)->mv(-1,0)->sever->(:,*($mini_mins->dim(1)),*($mini_mins->dim(2)));
-
-
-	 ##########
-	 # Now generate the weighting function.  We find the median of mini_mins, and 
-	 # discard anything too far from it.
-	 #
-	 # A bug in Slatec is triggered when a point weight is zero, so we set "zero" weights
-	 # to something merely small.  This could be an issue with bad values, except that we
-	 # should have discarded them a long time ago.
-	 $mmm = $mini_mins->medover->(*1);
-	 $mmv = ($mini_mins-$mmm)->abs;
-	 $mmvm = $mmv->average->(*1);
-	 
-	 $weight = ($mmv < $mmvm*2) + 1e-20;
-	 
-	 print "mini_mins is ",join("x",$mini_mins->dims),"\n";
-
-	 my $coeffs = polyfit($mini_x, 
-			      $mini_mins, 
-			      $weight,
-			      $opt->{F_POLYNOMIAL}, 0);
-
-
-	 my($xv) = xvals($ims->dim(2));
-
-	 print "coeffs is ",join('x',$coeffs->dims),"\n";
-
-	 my($bkg) = $coeffs->(*1,(-1))->copy;
-	 my($ii);
-	 for($ii=$coeffs->dim(0)-2; $ii >= 0; $ii--) {
-	     $bkg *= $xv;
-	     $bkg += $coeffs->(*1,($i));
-	 }
-
-	 $out->{BKSUB_CUBE} -= $bkg->mv(0,2);
-     }
-
 
      unless(exists($out->{log})) {
 	 $out->{log} = [];

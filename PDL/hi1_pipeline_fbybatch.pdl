@@ -1,0 +1,155 @@
+# -*-perl-*-
+use strict;
+
+=head2 hi1_pipeline_fbybatch
+
+=for usage
+
+hi1_pipeline_fbybatch($batchno, $opt);
+
+=for ref
+
+hi1_pipeline_fbybatch prefrobnicates a batch of hi1 data to generate
+a simple background coronal model.  The background coronal model is
+cached in a standard directory ("./F" by default), and given a standardized
+file name ("batch-%4.4d-F.fts").  The coronal models can then be used by 
+remove_f_corona to produce a smoothly varying background.
+
+Locally parsed options are:
+
+=over 3
+
+=item HI1_SC
+
+This should contain "a" or "b".  It defaults to "a".
+
+=item HI1_L1_DIR  
+
+This is the directory where level-1 files may be found.  (Default is 
+C<< /net/helio/d0/stereo/L1/<HI1_SC>/img/hi_1 >>). Files are expected
+to be organized in daily directories named in C<yyyymmdd> form.
+
+=item pct
+
+Percentile value to take as background (default 5)
+
+=back
+
+=cut
+
+use Date::Parse;
+use Date::Format;
+use PDL::IO::Dumper;
+
+sub hi1_pipeline_fbybatch {
+    my $batchno = shift;
+    my $opt = shift // {};
+
+    my $defaults = {
+	HI1_SC => 'a',
+	HI1_L1_DIR => '/net/helio/d0/stereo/L1/%s/img/hi_1',
+	pct => 5,
+
+	OUTPUT_DIR => 'F',
+
+	BATCHLENGTH => 7,
+	BATCH_STEP  => 0.5,
+	CADENCE     => 40
+    };
+    for my $k(keys %$defaults) {
+	$opt->{$k} = $defaults->{$k} unless(exists($opt->{$k}));
+    }
+
+    print "hi1_pipeline_fbybatch: opt is ".sdump($opt) if($opt->{VERBOSE});
+
+    unless( $opt->{HI1_SC} =~ m/^[ab]$/) {
+	die "hi1_pipeline_fbybatch: HI1_SC option must be 'a' or 'b'\n";
+    }
+
+    my $l1dir = sprintf($opt->{HI1_L1_DIR},$opt->{HI1_SC});
+    
+    # Figure batch time range from batch number
+    my $t0 = str2time("2007-01-01T00:00:00Z");
+    $t0 += $batchno * $opt->{BATCH_STEP} * 24 * 3600;
+    my $t1 = $t0 + $opt->{BATCHLENGTH} * 24 * 3600;
+    my $t_center = $t0 + $opt->{BATCHLENGTH} * 24 * 3600 / 2;
+    my $tstamp_center = time2str("%Y-%m-%dT%H:%M:%SZ",$t_center,'Z');
+
+        ##############################
+    # Now figure the directories to inspect
+    my @dirlist = ();
+    my $i;
+    for($i=$t0; $i<$t1; $i+= 3600*24){
+	push(@dirlist, $l1dir."/".time2str("%Y%m%d",$i,'Z'));
+    }
+    print "dirlist is ".join(",",@dirlist)."\n" if($opt->{VERBOSE});
+
+    ##############################
+    # Assemble a file list.  Do some rudimentary validation of the files.
+
+    ## @fcheck gets a list of files to check.
+    my @fcheck = map { (<$_/*>) } @dirlist;
+    
+    ## @f gets a list of files that seem OK at first glance. 
+    ## @cr gets the CROTA history.  If the spacecraft turns more than a little,
+    ## then the file gets rejected - but we have to get the whole dataset before
+    ## we can carry out that rejection.
+    my @f = ();
+    my @cr = ();
+
+    ## Accumulate probably-ok files and their CROTA values into @f and @cr.
+    for my $fc(@fcheck) {
+	print "\n$fc " if($opt->{VERBOSE});
+	my $h = eval { rfits($fc,{data=>0}) };
+	next unless(ref($h) eq 'HASH');
+	
+	my $ht = str2time($h->{'DATE-OBS'});
+	print "ht:$h->{'DATE-OBS'}  " if($opt->{VERBOSE});
+	next unless($ht >= $t0  and  $ht < $t1);
+	
+	print "SIZ:$h->{NAXIS1}x$h->{NAXIS2}  " if($opt->{VERBOSE});
+	next unless($h->{NAXIS1} > 1000);
+	next unless($h->{NAXIS2} > 1000);
+
+	print "exp:$h->{EXPTIME}  " if($opt->{VERBOSE});
+	next unless($h->{EXPTIME} > 1000);
+	
+	push(@f, $fc);
+	push(@cr, $h->{CROTA});
+    }
+    print "\n\n" if($opt->{VERBOSE});
+
+    ## Now look for files that deviate by more than a degree
+    ## from the median of the batch, and reject those.
+    my $cr = pdl(@cr);
+    my $crmed = $cr->median;
+    my @crok = (abs($cr - $crmed) < 1 )->list;
+    
+    print "crmed is $crmed; cr is $cr\n" if($opt->{VERBOSE});
+    
+    my @ff = ();
+    for $i(0..$#f){
+	push(@ff, $f[$i]) if($crok[$i]);
+    }
+    
+    my $n_expected = $opt->{BATCHLENGTH} * 24 * 60 / $opt->{CADENCE};
+    
+    if(@ff < $n_expected * 0.667) {
+	die "Too few files to run batch $batchno -- expected $n_expected, found ".(0+@ff)."\n";
+    }
+ 
+    my $hash = read_files(\@ff, $opt);
+    
+    my $ims = $hash->{RAW_CUBE};
+    my $sn = $ims->dim(2) * ($opt->{'pct'}/100) + 0.5;
+    my $sm = $opt->{'sm'} || 1;
+    my $bk = extract_minimum($ims, {n_min => $sn, reach=>($sm-1)/2});
+    
+    `mkdir $opt->{OUTPUT_DIR}`;
+    $bk->fhdr->{HISTORY} = "F coronal model extracted from HI-1 batch $batchno, $opt->{'pct'} percentile";
+    $bk->fhdr->{HISTORY} .= "(extracted at batch center time)";
+    $bk->fhdr->{'CEN_TIME'} = $tstamp_center;
+    wfits($bk, sprintf("%s/hi1%s-batch-%4.4d-bkg.fits",$opt->{OUTPUT_DIR},$opt->{HI1_SC},$batchno));
+    
+    return $bk;
+}

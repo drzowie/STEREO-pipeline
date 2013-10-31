@@ -109,7 +109,7 @@ sub hi1_pipeline {
 	MASK_RADIUS             => 0,     # No radial masking
 	MARK_BAD                => 0,     # Don't bother marking bad elements
 	BAD_DIL_FR              => 0,     # Items marked bad should not be dilated across frames
-	BAD_DIL_PIX             => 2,   # Dilate spatially by +/- 1.5 pixel (5 total)
+	BAD_DIL_PIX             => 2,     # Dilate spatially by +/- 1.5 pixel (5 total)
 
 	DIST_MIN_PCORR=>0.9,
 	DIST_CORRTIME           => 3,       # Use 3-day correlation
