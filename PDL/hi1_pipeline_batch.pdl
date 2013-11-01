@@ -30,7 +30,7 @@ This should contain "a" or "b".  It defaults to "a".
 =item HI1_L1_DIR 
 
 This is the directory where level-1 files may be found.  (Default is
-C<< /net/helio/d0/stereo/L1/<HI1_SC>/img/hi_1 >>).  Files are expected
+C<< /net/sol/d0/stereo/L1/<HI1_SC>/img/hi_1 >>).  Files are expected
 to be organized in daily directories named in C<yyyymmdd> form.
 
 =item HI1_OUTPUT_TEMPLATE
@@ -65,7 +65,7 @@ sub hi1_pipeline_batch {
 
     my $opt_defaults = {
      HI1_SC              => "a",
-     HI1_L1_DIR          => "/net/helio/d0/stereo/L1/%s/img/hi_1",
+     HI1_L1_DIR          => "/net/sol/d0/stereo/L1/%s/img/hi_1",
      HI1_OUTPUT_TEMPLATE => "hi1-batch-%4.4d"
     };
 

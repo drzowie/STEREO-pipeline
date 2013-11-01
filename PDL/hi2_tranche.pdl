@@ -24,7 +24,7 @@ sub hi2_tranche {
 
     $defaults = {
 	TRANCHE_LENGTH	=> 60,                                       # days
-        L1_dir          => "/net/helio/d0/stereo/L1/a/img/hi_2"
+        L1_dir          => "/net/sol/d0/stereo/L1/a/img/hi_2"
     };
 
     for $k(keys %$defaults) {
