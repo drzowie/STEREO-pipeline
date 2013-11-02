@@ -48,9 +48,9 @@ sub hi1_pipeline_fbybatch {
     my $defaults = {
 	HI1_SC => 'a',
 	HI1_L1_DIR => '/net/sol/d0/stereo/L1/%s/img/hi_1',
-	pct => 5,
+	pct => 3,
 
-	OUTPUT_DIR => 'F',
+	OUTPUT_DIR => 'F/%s/hi_1',
 
 	BATCHLENGTH => 7,
 	BATCH_STEP  => 0.5,
@@ -74,6 +74,7 @@ sub hi1_pipeline_fbybatch {
     my $t1 = $t0 + $opt->{BATCHLENGTH} * 24 * 3600;
     my $t_center = $t0 + $opt->{BATCHLENGTH} * 24 * 3600 / 2;
     my $tstamp_center = time2str("%Y-%m-%dT%H:%M:%SZ",$t_center,'Z');
+    my $tstamp_fname = time2str("%Y%m%d_%H%M%S_fmodel.fts",$t_center,'Z');
 
         ##############################
     # Now figure the directories to inspect
@@ -145,11 +146,20 @@ sub hi1_pipeline_fbybatch {
     my $sm = $opt->{'sm'} || 1;
     my $bk = extract_minimum($ims, {n_min => $sn, reach=>($sm-1)/2});
     
+    # Create the output directory and its subdirs
+    my $output_dir = sprintf($opt->{OUTPUT_DIR},$opt->{HI1_SC});
+    unless(-e $output_dir) {
+	my @subs = split /\//,$output_dir;
+	for my $i(0..$#subs) {
+	    my $dir = join("/",@subs[0..$i]);
+	    `mkdir $dir`;
+	}
+    }
+
     `mkdir $opt->{OUTPUT_DIR}`;
     $bk->fhdr->{HISTORY} = "F coronal model extracted from HI-1 batch $batchno, $opt->{'pct'} percentile";
     $bk->fhdr->{HISTORY} .= "(extracted at batch center time)";
     $bk->fhdr->{'CEN_TIME'} = $tstamp_center;
-    wfits($bk, sprintf("%s/hi1%s-batch-%4.4d-bkg.fits",$opt->{OUTPUT_DIR},$opt->{HI1_SC},$batchno));
-    
+    wfits($bk, sprintf("%s/%s",$output_dir,$tstamp_fname));
     return $bk;
 }
