@@ -31,7 +31,7 @@ sub movie_from_cube {
     my $defaults = {
 	fname   =>  "frame-%4.4d.png",
 	title   =>  undef,
-	term    =>  "png",
+	term    =>  "pngcairo",
 	topt    => {size=>[8,8],enhanced=>1},
 	popt    => {clut=>'sepia',j=>1,globalwith=>'image'},
 	cores   => 4,
