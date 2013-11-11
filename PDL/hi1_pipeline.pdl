@@ -118,11 +118,11 @@ sub hi1_pipeline {
 	DIST_CORR_PSIZE         => 35,      # 35 pixel radius patch size for final correlation
 	DIST_GUESS_DRIFTRATE    => 260/5,   # Initial guess is 260 pixels in 5 days
 
-	NULL_MIN_PCT		=> 1,      # Null stars to the 3rd percentile
-	NULL_SMOOTH_SIZE	=> [3,3],  # Smooth 3x3 pixels with a median filter.
+	NULL_MIN_PCT		=> 2,      # Null stars to the 2nd percentile
+	NULL_SMOOTH_SIZE	=> [3,1],  # Smooth 3x1 pixels with a median filter.
 	NULL_SMOOTH_FRAMES      => 1,      # Actually do the smoothing
 	NULL_UNSHARP_FILTER     => 6,      # Radius for the unsharp-filter mask used to find residual spikes
-	MAX_PCT_BAD             => 50,
+	MAX_PCT_BAD             => 30,
 
 	INTERP_METHOD           => 'h',    # Use hanning-window interpolation instead of pure Gaussian.
 
@@ -151,7 +151,7 @@ sub hi1_pipeline {
 	DEBUG_OUTPUT_PREFIX     => "tmp/",
 	CLEAN_MARGIN_FRAMES     => 2,
 
-	FINAL_POLY              => 1,
+	FINAL_POLY              => 0,
 	POLY_TRIM_PERCENTILE=>[3,30,20],
 	
     };

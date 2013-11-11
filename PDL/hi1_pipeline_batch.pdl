@@ -159,9 +159,3 @@ sub hi1_pipeline_batch {
         return @ff;
     }
 }
-    
-    
-    
-    
-
-
