@@ -52,7 +52,7 @@ sub hi1_pipeline_fbybatch {
 
 	OUTPUT_DIR => 'F/%s/hi_1',
 
-	BATCHLENGTH => 7,
+	BATCHLENGTH => 14,
 	BATCH_STEP  => 0.5,
 	CADENCE     => 40
     };
@@ -160,6 +160,10 @@ sub hi1_pipeline_fbybatch {
     $bk->fhdr->{HISTORY} = "F coronal model extracted from HI-1 batch $batchno, $opt->{'pct'} percentile";
     $bk->fhdr->{HISTORY} .= "(extracted at batch center time)";
     $bk->fhdr->{'CEN_TIME'} = $tstamp_center;
+    $bk->fhdr->{'ST_TIME'} = $hash->{RAW_HDRS}->[0]->{'DATE-OBS'};
+    $bk->fhdr->{'EN_TIME'} = $hash->{RAW_HDRS}->[-1]->{'DATE-OBS'};
+    $bk->fhdr->{'DAYS'} = $opt->{'BATCHLENGTH'};
+    
     wfits($bk, sprintf("%s/%s",$output_dir,$tstamp_fname));
     return $bk;
 }

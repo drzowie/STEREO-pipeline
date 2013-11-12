@@ -66,6 +66,7 @@ sub hi1_pipeline_batch {
     my $opt_defaults = {
      HI1_SC              => "a",
      HI1_L1_DIR          => "/net/sol/d0/stereo/L1/%s/img/hi_1",
+     HI1_F_DIR          => "/net/sol/d0/stereo/F/%s/hi_1",
      HI1_OUTPUT_TEMPLATE => "hi1-batch-%4.4d"
     };
 

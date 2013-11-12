@@ -51,6 +51,11 @@ Options are:
 
 =over 3
 
+=item USE_F_MODEL - use a precalculated F coronal model
+
+If this is set to true, then instead of minimum-value calculation 
+from the batch of images, do pixelwise linear interpolation between
+precalculated F coronal models.
 
 =item pct - percentile to use for the f corona
 
@@ -74,6 +79,9 @@ helpful in normal use.
 use PDL::NiceSlice;
 use PDL::Transform;
 use PDL::Bad;
+use Date::Parse;
+use Date::Format;
+
 sub remove_f_corona {
      local($PDL::BIGPDL) = 1;
      my $VERSION = "2.2 28-Jun-2013";
@@ -85,10 +93,10 @@ sub remove_f_corona {
      $opt = {} unless defined($opt);
 
      # Set default values for options
+     $opt->{'USE_F_MODEL'} = "/net/sol/d0/stereo/F/%s/%s"  unless( exists( $opt->{'USE_F_MODEL'} ) );
      $opt->{'pct'}    = 5      unless( exists( $opt->{'pct'}  )  ); # percentile for background
      $opt->{'sm'}     = 1      unless( exists( $opt->{'sm'}   )  ); # no smoothing of background by default
      $opt->{'neg'}    = "bad"  unless( exists( $opt->{'neg'}  )  ); # how to handle negative values
-
 
      # Make sure we have a data cube in usable form
      if( ref($in) !~ m/HASH/ ) {
@@ -107,6 +115,54 @@ sub remove_f_corona {
 	 
 	 $in = read_files($in,$opt);
      }
+
+     if( $opt->{'USE_F_MODEL'} ) {
+	 if( $opt->{'USE_F_MODEL'} =~ m/\%s/ ) {
+	     unless(exists($opt->{'SC'})) {
+		 my $obsrvtry = $in->{RAW_HDRS}->[0]->{OBSRVTRY};
+		 if($obsrvtry =~ m/STEREO_([AB])/i){
+		     $opt->{'SC'} = lc($1);
+		 } else {
+		     die "Couldn't figure spacecraft (A/B)";
+		 }
+	     }
+	     unless(exists($opt->{'INST'})) {
+		 my $inst = $in->{RAW_HDRS}->[0]->{DETECTOR};
+		 if($inst =~ m/HI(\d)/) {
+		     $opt->{'INST'} = "hi_$1";
+		 } elsif($inst =~ m/COR(\d)/) {
+		     $opt->{'INST'} = "cor$1";
+		 } else {
+		     die "Couldn't figure instrument (HI1/HI2/COR1/COR2)";
+		 }
+	     }
+	 }
+	 my $f_model_dir = sprintf($opt->{'USE_F_MODEL'},$opt->{'SC'},$opt->{'INST'});
+	 
+	 my @days = ();
+	 my $t0 = str2time($in->{RAW_HDRS}->[0]->{'DATE-OBS'},"Z");
+	 my $t1 = str2time($in->{RAW_HDRS}->[-1]->{'DATE-OBS'},"Z");
+	 $t0 -= 48*3600;
+	 $t1 += 48*3600;
+	 my $t;
+	 my %ff = ();
+	 for ($t=$t0; $t < $t1; $t += 24*3600 ) {
+	     my $pattern = $opt->{'USE_F_MODEL'}."/".time2str("%Y%m%d_",$t,'Z');
+	     map { $ff{$_}=1 } (eval "<$pattern*>");
+	 }
+	 my @ff = sort keys %ff;
+	 print "ff is \n\t".join("\n\t",@ff)."\n";
+	 
+	 unless(@ff) {
+	     die "Couldn't find any F corona models for the range ".time2str("%Y-%m-%d",$t0,'Z')." -- ".time2str("%Y-%m-%d",$t1,'Z');
+	 }
+	 
+	 die "FIX ME!";
+
+	 return $in;
+     }
+
+	 
 
      my $ims = $in->{RAW_CUBE};
 
