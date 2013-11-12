@@ -10,20 +10,32 @@ use PDL::NiceSlice;
 
  $ret = remove_f_corona( $ims , $opt );
 
- # $ims should be either a hash ref containing the images to be processed as a 3-D PDL in the "RAW_CUBE" field,
- # or a list ref of images.  If the RAW_CUBE field is used, the hash should also contain a RAW_HDRS list ref.
+ # $ims should be either a hash ref containing the images to be
+ # processed as a 3-D PDL in the "RAW_CUBE" field, or a list ref of
+ # images.  If the RAW_CUBE field is used, the hash should also
+ # contain a RAW_HDRS list ref.
 
  # $opt is an options hash.
 
 =for ref
 
-C<remove_f_corona> is the first step in both the hi-1 and hi-2 pipelines, and therefore it includes the process
-of loading the data into memory.  (It would not be unreasonable to break this first step out in a future version).
+C<remove_f_corona> is the first step in both the hi-1 and hi-2
+pipelines (aside from loading the files themselves into memory, a task
+that is delegated to C<read_files>).  If you supply a list ref of
+images or image names, then the list ref is passed to C<read_files> to
+produce a data storage hash.  
 
-If you supply a list ref of images or image names, then the images are regularized and a data processing hash is 
-created.  The images undergo some preprocessing and filtering to reject images that appear to not be part of a 
-regular sequence.   This is handled by C<read_files>.
+By default f corona subtraction now uses a pre-processed set of F
+corona models.  This is controlled with the C<USE_F_MODEL> option,
+which points to a directory containing the models, organized by date.
+The observation time of each image in the set is compared to the set
+of F corona models, and the two model bracketing it in time are
+selected.  A linearly interpolated model is subtracted from the image.
 
+If you don't want to use precalculated models, you can fall back to 
+old-style processing and use just the batch itself to generate an 
+F corona model on-the-fly.  In that case, set C<USE_F_MODEL> to a
+false value and the old logic still applies (see below).
 
 After the initial ingestion and cleaning, the F corona subtraction is
 straightforward: the images are sorted and the specified percentile
@@ -157,7 +169,40 @@ sub remove_f_corona {
 	     die "Couldn't find any F corona models for the range ".time2str("%Y-%m-%d",$t0,'Z')." -- ".time2str("%Y-%m-%d",$t1,'Z');
 	 }
 	 
-	 die "FIX ME!";
+	 use PDL::DiskCache; 
+	 $coronae = diskcache(\@ff,{ro=>1});
+	 @t = map { m/(\d\d\d\d)(\d\d)(\d\d)_(\d\d)(\d\d)(\d\d)_fmodel/ || die "File name didn't match!";
+		    str2time("$1-$2-$3T$4:$5:$6Z");
+	    } (@ff);
+	 $t = pdl(@t);
+	 
+	 $in->{BKSUB_CUBE} = $in->{RAW_CUBE}->copy;
+
+	 print "Subtracting";
+	 for my $i(0..$in->{RAW_CUBE}->dim(2)-1) {
+	     my $custom_f;
+	     my $alpha;
+	     $now = str2time($in->{RAW_HDRS}->{'DATE-OBS'},"Z");
+	     $lodex = ($t<$now)->which;
+	     $lodex = pdl('BAD') unless($lodex->nelem);  # Work around bug in max in PDL<=2.007
+	     $lodex = $lodex->max;
+
+	     if( isbad($lodex) || $lodex >= $t->dim(0)-1 ) {
+		 printf STDERR "WARNING: extrapolating F corona for time $in->{RAW_HDRS}->{'DATE-OBS'}\n";
+		 if(isbad($lodex)) {
+		     $custom_f = $coronae->[0];
+		 } else {
+		     $custom_f = $coronae->[$#$coronae];
+		 }
+	     } else {
+		 $alpha = ($now - $t->(($lodex))) / ($t->(($lodex+1))-$t->(($lodex)));
+		 $custom_f = $coronae->[$lodex] * (1 - $alpha) + $coronae->[$lodex+1] * $alpha;
+	     }
+
+	     $in->{BKSUB_CUBE}->(:,:,($i)) -= $custom_f;
+	     print ".";
+	 }
+	 print "\n";
 
 	 return $in;
      }
