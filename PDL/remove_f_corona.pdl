@@ -159,19 +159,19 @@ sub remove_f_corona {
 	 my $t;
 	 my %ff = ();
 	 for ($t=$t0; $t < $t1; $t += 24*3600 ) {
-	     my $pattern = $opt->{'USE_F_MODEL'}."/".time2str("%Y%m%d_",$t,'Z');
+	     my $pattern = $f_model_dir."/".time2str("%Y%m%d_",$t,'Z');
 	     map { $ff{$_}=1 } (eval "<$pattern*>");
 	 }
 	 my @ff = sort keys %ff;
 	 print "ff is \n\t".join("\n\t",@ff)."\n";
 	 
 	 unless(@ff) {
-	     die "Couldn't find any F corona models for the range ".time2str("%Y-%m-%d",$t0,'Z')." -- ".time2str("%Y-%m-%d",$t1,'Z');
+	     die "Couldn't find any F corona models for the range ".time2str("%Y-%m-%d",$t0,'Z')." -- ".time2str("%Y-%m-%d",$t1,'Z')." in the directory $f_model_dir.\n";
 	 }
 	 
 	 use PDL::DiskCache; 
-	 $coronae = diskcache(\@ff,{ro=>1});
-	 @t = map { m/(\d\d\d\d)(\d\d)(\d\d)_(\d\d)(\d\d)(\d\d)_fmodel/ || die "File name didn't match!";
+	 my $coronae = diskcache(\@ff,{ro=>1});
+	 my @t = map { m/(\d\d\d\d)(\d\d)(\d\d)_(\d\d)(\d\d)(\d\d)_fmodel/ || die "File name didn't match!";
 		    str2time("$1-$2-$3T$4:$5:$6Z");
 	    } (@ff);
 	 $t = pdl(@t);
@@ -182,8 +182,8 @@ sub remove_f_corona {
 	 for my $i(0..$in->{RAW_CUBE}->dim(2)-1) {
 	     my $custom_f;
 	     my $alpha;
-	     $now = str2time($in->{RAW_HDRS}->{'DATE-OBS'},"Z");
-	     $lodex = ($t<$now)->which;
+	     my $now = str2time($in->{RAW_HDRS}->[$i]->{'DATE-OBS'},"Z");
+	     my $lodex = ($t<$now)->which;
 	     $lodex = pdl('BAD') unless($lodex->nelem);  # Work around bug in max in PDL<=2.007
 	     $lodex = $lodex->max;
 

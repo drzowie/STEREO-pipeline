@@ -102,7 +102,6 @@ sub hi1_pipeline {
 	FILE_STATUS_DB          => 0,
 	REJECT_BY_PATCH         => 0,
 
-	USE_F_MODEL             => 1,     # Use the modeled F coronae from an earlier fbybatch pass, instead of on-the-fly F corona
 	pct			=> 2,     # 2% for F corona - could be smaller maybe, but works OK    (on-the-fly F only)
 	sm                      => 0,     # No smoothing at the remove_f_corona stage                 (on-the-fly F only)
 	bin			=> 0,     # don't bother rebinning 2k x 2k images - just reject them
@@ -164,11 +163,15 @@ sub hi1_pipeline {
 
     our $hash;
 
-    print "\n***\nin_list has ".(0+@$in_list)." elements\n***\n\n";
-
-    ##############################
-    # Read and filter files, and create the working hash.
-    $hash = read_files($in_list,$opt);
+    if(ref($in_list) eq 'HASH') {
+	$hash = $in_list;
+    } else {
+	print "\n***\nin_list has ".(0+@$in_list)." elements\n***\n\n";
+	
+	##############################
+	# Read and filter files, and create the working hash.
+	$hash = read_files($in_list,$opt);
+    }
     movie_from_cube($hash->{RAW_CUBE},{fname=>"f-%3.3d.png",
 				       topt=>{size=>[14,11]},
 				       popt=>{j=>1,clut=>'sepia',cbr=>[0,1e-11]},

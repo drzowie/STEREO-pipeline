@@ -266,7 +266,7 @@ sub get_distortion_params2 {
     our $nlx = pdl(0,0,0,0,0,0);
     our @nlx = ();
     $ii = 0;
-    
+    print "initial fit...\n";
     # Initial fit -- "basic six" parameters
     for(;$ii<5;$ii++) {
 	$nlx = amoeba($heur, $nlx, $siz/sqrt($ii+1), 1e-6, 1e-9, 1e4);
