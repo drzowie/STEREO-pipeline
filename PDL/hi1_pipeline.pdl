@@ -102,14 +102,14 @@ sub hi1_pipeline {
 	FILE_STATUS_DB          => 0,
 	REJECT_BY_PATCH         => 0,
 
-	pct			=> 2,     # 2% for F corona - could be smaller maybe, but works OK
-	sm                      => 0,     # No smoothing at the remove_f_corona stage
+	pct			=> 2,     # 2% for F corona - could be smaller maybe, but works OK    (on-the-fly F only)
+	sm                      => 0,     # No smoothing at the remove_f_corona stage                 (on-the-fly F only)
 	bin			=> 0,     # don't bother rebinning 2k x 2k images - just reject them
 	REMOVE_FLUCTUATIONS	=> 1,     # Do remove exposure fluctuations
 	MASK_RADIUS             => 0,     # No radial masking
 	MARK_BAD                => 0,     # Don't bother marking bad elements
 	BAD_DIL_FR              => 0,     # Items marked bad should not be dilated across frames
-	BAD_DIL_PIX             => 2,   # Dilate spatially by +/- 1.5 pixel (5 total)
+	BAD_DIL_PIX             => 2,     # Dilate spatially by +/- 1.5 pixel (5 total)
 
 	DIST_MIN_PCORR=>0.9,
 	DIST_CORRTIME           => 3,       # Use 3-day correlation
@@ -118,11 +118,11 @@ sub hi1_pipeline {
 	DIST_CORR_PSIZE         => 35,      # 35 pixel radius patch size for final correlation
 	DIST_GUESS_DRIFTRATE    => 260/5,   # Initial guess is 260 pixels in 5 days
 
-	NULL_MIN_PCT		=> 1,      # Null stars to the 3rd percentile
-	NULL_SMOOTH_SIZE	=> [3,3],  # Smooth 3x3 pixels with a median filter.
+	NULL_MIN_PCT		=> 2,      # Null stars to the 2nd percentile
+	NULL_SMOOTH_SIZE	=> [3,1],  # Smooth 3x1 pixels with a median filter.
 	NULL_SMOOTH_FRAMES      => 1,      # Actually do the smoothing
 	NULL_UNSHARP_FILTER     => 6,      # Radius for the unsharp-filter mask used to find residual spikes
-	MAX_PCT_BAD             => 50,
+	MAX_PCT_BAD             => 30,
 
 	INTERP_METHOD           => 'h',    # Use hanning-window interpolation instead of pure Gaussian.
 
@@ -151,7 +151,7 @@ sub hi1_pipeline {
 	DEBUG_OUTPUT_PREFIX     => "tmp/",
 	CLEAN_MARGIN_FRAMES     => 2,
 
-	FINAL_POLY              => 1,
+	FINAL_POLY              => 0,
 	POLY_TRIM_PERCENTILE=>[3,30,20],
 	
     };
@@ -163,11 +163,15 @@ sub hi1_pipeline {
 
     our $hash;
 
-    print "\n***\nin_list has ".(0+@$in_list)." elements\n***\n\n";
-
-    ##############################
-    # Read and filter files, and create the working hash.
-    $hash = read_files($in_list,$opt);
+    if(ref($in_list) eq 'HASH') {
+	$hash = $in_list;
+    } else {
+	print "\n***\nin_list has ".(0+@$in_list)." elements\n***\n\n";
+	
+	##############################
+	# Read and filter files, and create the working hash.
+	$hash = read_files($in_list,$opt);
+    }
     movie_from_cube($hash->{RAW_CUBE},{fname=>"f-%3.3d.png",
 				       topt=>{size=>[14,11]},
 				       popt=>{j=>1,clut=>'sepia',cbr=>[0,1e-11]},

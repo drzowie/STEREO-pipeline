@@ -10,20 +10,32 @@ use PDL::NiceSlice;
 
  $ret = remove_f_corona( $ims , $opt );
 
- # $ims should be either a hash ref containing the images to be processed as a 3-D PDL in the "RAW_CUBE" field,
- # or a list ref of images.  If the RAW_CUBE field is used, the hash should also contain a RAW_HDRS list ref.
+ # $ims should be either a hash ref containing the images to be
+ # processed as a 3-D PDL in the "RAW_CUBE" field, or a list ref of
+ # images.  If the RAW_CUBE field is used, the hash should also
+ # contain a RAW_HDRS list ref.
 
  # $opt is an options hash.
 
 =for ref
 
-C<remove_f_corona> is the first step in both the hi-1 and hi-2 pipelines, and therefore it includes the process
-of loading the data into memory.  (It would not be unreasonable to break this first step out in a future version).
+C<remove_f_corona> is the first step in both the hi-1 and hi-2
+pipelines (aside from loading the files themselves into memory, a task
+that is delegated to C<read_files>).  If you supply a list ref of
+images or image names, then the list ref is passed to C<read_files> to
+produce a data storage hash.  
 
-If you supply a list ref of images or image names, then the images are regularized and a data processing hash is 
-created.  The images undergo some preprocessing and filtering to reject images that appear to not be part of a 
-regular sequence.   This is handled by C<read_files>.
+By default f corona subtraction now uses a pre-processed set of F
+corona models.  This is controlled with the C<USE_F_MODEL> option,
+which points to a directory containing the models, organized by date.
+The observation time of each image in the set is compared to the set
+of F corona models, and the two model bracketing it in time are
+selected.  A linearly interpolated model is subtracted from the image.
 
+If you don't want to use precalculated models, you can fall back to 
+old-style processing and use just the batch itself to generate an 
+F corona model on-the-fly.  In that case, set C<USE_F_MODEL> to a
+false value and the old logic still applies (see below).
 
 After the initial ingestion and cleaning, the F corona subtraction is
 straightforward: the images are sorted and the specified percentile
@@ -51,6 +63,11 @@ Options are:
 
 =over 3
 
+=item USE_F_MODEL - use a precalculated F coronal model
+
+If this is set to true, then instead of minimum-value calculation 
+from the batch of images, do pixelwise linear interpolation between
+precalculated F coronal models.
 
 =item pct - percentile to use for the f corona
 
@@ -74,7 +91,10 @@ helpful in normal use.
 use PDL::NiceSlice;
 use PDL::Transform;
 use PDL::Bad;
-sub  remove_f_corona {
+use Date::Parse;
+use Date::Format;
+
+sub remove_f_corona {
      local($PDL::BIGPDL) = 1;
      my $VERSION = "2.2 28-Jun-2013";
      my $i;
@@ -85,32 +105,109 @@ sub  remove_f_corona {
      $opt = {} unless defined($opt);
 
      # Set default values for options
-     $opt->{'neg'}    = "bad"  unless( exists( $opt->{'neg'}  )  ); # how to handle negative values
+     $opt->{'USE_F_MODEL'} = "/net/sol/d0/stereo/F/%s/%s"  unless( exists( $opt->{'USE_F_MODEL'} ) );
      $opt->{'pct'}    = 5      unless( exists( $opt->{'pct'}  )  ); # percentile for background
      $opt->{'sm'}     = 1      unless( exists( $opt->{'sm'}   )  ); # no smoothing of background by default
-     $opt->{'bin'}    = 0      unless( exists( $opt->{'bin'}  )  ); # whether to deal with multiply binned full-frame images
-     $opt->{'MASK_THRESH'} = 500 unless( exists($opt->{'MASK_THRESH'}) );
-     $opt->{'MASK_RADIUS'} = 500 unless(exists($opt->{'MASK_RADIUS'}));
-     $opt->{'MARK_BAD'} = 1 unless(exists($opt->{'MARK_BAD'}));
-     $opt->{'IMG_SIZE'} = 1024 unless(exists($opt->{'IMG_SIZE'}));
-     $opt->{'REJECT_BY_SUM'} = 0.03 unless(exists($opt->{'REJECT_BY_SUM'})); 
-     $opt->{'REJECT_BY_CROTA'} = 2 unless(exists($opt->{'REJECT_BY_CROTA'}));
-     $opt->{'CLEAN_BAD'} = 1 unless(exists($opt->{'CLEAN_BAD'}));
-     $opt->{'BAD_DIL_PIX'} = 1 unless(exists($opt->{'BAD_DIL_PIX'}));
-     $opt->{'BAD_DIL_FR'} = 0 unless(exists($opt->{'BAD_DIL_FR'}));
-     $opt->{'F_POLYNOMIAL'} = 3 unless(exists($opt->{'F_POLYNOMIAL'}));
-     $opt->{'F_MINI'} = 20      unless(exists($opt->{'F_MINI'}));
-     $opt->{'F_MINI_SKIP'} = 1      unless(exists($opt->{'F_MINI_SKIP'}));
-     $opt->{'F_MINI_PCT'} = 5      unless(exists($opt->{'F_MINI_PCT'}));  #5
-     $opt->{'F_POLY_APERTURE'} = 1 unless(exists($opt->{'F_POLY_APERTURE'}));  # 21
-     $opt->{'F_POLY_SKIP'} = 3 unless(exists($opt->{'F_POLY_SKIP'}));
+     $opt->{'neg'}    = "bad"  unless( exists( $opt->{'neg'}  )  ); # how to handle negative values
 
      # Make sure we have a data cube in usable form
      if( ref($in) !~ m/HASH/ ) {
 	 # Legacy for old calling convention - jump down into read_files unless
 	 # we have a batch hash.
+	 $opt->{'bin'}    = 0      unless( exists( $opt->{'bin'}  )  ); # whether to deal with multiply binned full-frame images
+	 $opt->{'MASK_THRESH'} = 500 unless( exists($opt->{'MASK_THRESH'}) );
+	 $opt->{'MASK_RADIUS'} = 500 unless(exists($opt->{'MASK_RADIUS'}));
+	 $opt->{'MARK_BAD'} = 1 unless(exists($opt->{'MARK_BAD'}));
+	 $opt->{'IMG_SIZE'} = 1024 unless(exists($opt->{'IMG_SIZE'}));
+	 $opt->{'REJECT_BY_SUM'} = 0.03 unless(exists($opt->{'REJECT_BY_SUM'})); 
+	 $opt->{'REJECT_BY_CROTA'} = 2 unless(exists($opt->{'REJECT_BY_CROTA'}));
+	 $opt->{'CLEAN_BAD'} = 1 unless(exists($opt->{'CLEAN_BAD'}));
+	 $opt->{'BAD_DIL_PIX'} = 1 unless(exists($opt->{'BAD_DIL_PIX'}));
+	 $opt->{'BAD_DIL_FR'} = 0 unless(exists($opt->{'BAD_DIL_FR'}));
+	 
 	 $in = read_files($in,$opt);
      }
+
+     if( $opt->{'USE_F_MODEL'} ) {
+	 if( $opt->{'USE_F_MODEL'} =~ m/\%s/ ) {
+	     unless(exists($opt->{'SC'})) {
+		 my $obsrvtry = $in->{RAW_HDRS}->[0]->{OBSRVTRY};
+		 if($obsrvtry =~ m/STEREO_([AB])/i){
+		     $opt->{'SC'} = lc($1);
+		 } else {
+		     die "Couldn't figure spacecraft (A/B)";
+		 }
+	     }
+	     unless(exists($opt->{'INST'})) {
+		 my $inst = $in->{RAW_HDRS}->[0]->{DETECTOR};
+		 if($inst =~ m/HI(\d)/) {
+		     $opt->{'INST'} = "hi_$1";
+		 } elsif($inst =~ m/COR(\d)/) {
+		     $opt->{'INST'} = "cor$1";
+		 } else {
+		     die "Couldn't figure instrument (HI1/HI2/COR1/COR2)";
+		 }
+	     }
+	 }
+	 my $f_model_dir = sprintf($opt->{'USE_F_MODEL'},$opt->{'SC'},$opt->{'INST'});
+	 
+	 my @days = ();
+	 my $t0 = str2time($in->{RAW_HDRS}->[0]->{'DATE-OBS'},"Z");
+	 my $t1 = str2time($in->{RAW_HDRS}->[-1]->{'DATE-OBS'},"Z");
+	 $t0 -= 48*3600;
+	 $t1 += 48*3600;
+	 my $t;
+	 my %ff = ();
+	 for ($t=$t0; $t < $t1; $t += 24*3600 ) {
+	     my $pattern = $f_model_dir."/".time2str("%Y%m%d_",$t,'Z');
+	     map { $ff{$_}=1 } (eval "<$pattern*>");
+	 }
+	 my @ff = sort keys %ff;
+	 print "ff is \n\t".join("\n\t",@ff)."\n";
+	 
+	 unless(@ff) {
+	     die "Couldn't find any F corona models for the range ".time2str("%Y-%m-%d",$t0,'Z')." -- ".time2str("%Y-%m-%d",$t1,'Z')." in the directory $f_model_dir.\n";
+	 }
+	 
+	 use PDL::DiskCache; 
+	 my $coronae = diskcache(\@ff,{ro=>1});
+	 my @t = map { m/(\d\d\d\d)(\d\d)(\d\d)_(\d\d)(\d\d)(\d\d)_fmodel/ || die "File name didn't match!";
+		    str2time("$1-$2-$3T$4:$5:$6Z");
+	    } (@ff);
+	 $t = pdl(@t);
+	 
+	 $in->{BKSUB_CUBE} = $in->{RAW_CUBE}->copy;
+
+	 print "Subtracting";
+	 for my $i(0..$in->{RAW_CUBE}->dim(2)-1) {
+	     my $custom_f;
+	     my $alpha;
+	     my $now = str2time($in->{RAW_HDRS}->[$i]->{'DATE-OBS'},"Z");
+	     my $lodex = ($t<$now)->which;
+	     $lodex = pdl('BAD') unless($lodex->nelem);  # Work around bug in max in PDL<=2.007
+	     $lodex = $lodex->max;
+
+	     if( isbad($lodex) || $lodex >= $t->dim(0)-1 ) {
+		 printf STDERR "WARNING: extrapolating F corona for time $in->{RAW_HDRS}->{'DATE-OBS'}\n";
+		 if(isbad($lodex)) {
+		     $custom_f = $coronae->[0];
+		 } else {
+		     $custom_f = $coronae->[$#$coronae];
+		 }
+	     } else {
+		 $alpha = ($now - $t->(($lodex))) / ($t->(($lodex+1))-$t->(($lodex)));
+		 $custom_f = $coronae->[$lodex] * (1 - $alpha) + $coronae->[$lodex+1] * $alpha;
+	     }
+
+	     $in->{BKSUB_CUBE}->(:,:,($i)) -= $custom_f;
+	     print ".";
+	 }
+	 print "\n";
+
+	 return $in;
+     }
+
+	 
 
      my $ims = $in->{RAW_CUBE};
 
@@ -125,78 +222,6 @@ sub  remove_f_corona {
      $out->{BKSUB_CUBE} = $ims - $bk;
      undef $ims;
      undef $bk;
-
-     ##############################
-     # Do polynomial f-corona removal if requested
-     if($opt->{F_MINI}) {
-	 my @mini_mins;
-	 my @mini_x;
-
-	 our($mini_mins, $mini_x, $mmm, $mmv, $mmvm, $weight, $ims);
-
-	 $ims = $out->{BKSUB_CUBE};
-
-	 my $n = 1.5 * pdl(($ims->dim(2)) / $opt->{F_MINI} )->ceil ;
-
-	 print "Generating min-minima...";
-	 for my $i(0..$n-1) {
-	     print " $i";
-	     my $min = ($i * ($ims->dim(2) - $opt->{F_MINI} - 1) / $n)->floor;
-	     my $max = ($min + $opt->{F_MINI} - 1)->ceil;
-	     print "min is $min; max is $max\n";
-	     my $sk = $opt->{F_MINI_SKIP} || 1;
-	     my $subblock = $ims->(:,:,$min:$max:$sk)->sever;
-
-	     my $ap = ($opt->{F_POLY_APERTURE}-1) / 2;
-	     print "ap is $ap, skip is $opt->{F_MINI_PCT}\n";
-	     my $dex = $subblock->dim(2) * $ap * $ap / $opt->{F_POLY_SKIP} / $opt->{F_POLY_SKIP} * $opt->{'F_MINI_PCT'} / 100;
-	     print "dex=$dex";
-	     push(@mini_mins, extract_minimum($subblock, {n_min=>$dex, reach=>$ap, rstep=>$opt->{F_POLY_SKIP}}));
-	     print "$i of $n!\n";
-	     push(@mini_x,($min+$max)/2);
-	 }
-
-
-
-	 $mini_mins = pdl(@mini_mins)->mv(-1,0)->sever;
-	 $mini_x = pdl(@mini_x)->mv(-1,0)->sever->(:,*($mini_mins->dim(1)),*($mini_mins->dim(2)));
-
-
-	 ##########
-	 # Now generate the weighting function.  We find the median of mini_mins, and 
-	 # discard anything too far from it.
-	 #
-	 # A bug in Slatec is triggered when a point weight is zero, so we set "zero" weights
-	 # to something merely small.  This could be an issue with bad values, except that we
-	 # should have discarded them a long time ago.
-	 $mmm = $mini_mins->medover->(*1);
-	 $mmv = ($mini_mins-$mmm)->abs;
-	 $mmvm = $mmv->average->(*1);
-	 
-	 $weight = ($mmv < $mmvm*2) + 1e-20;
-	 
-	 print "mini_mins is ",join("x",$mini_mins->dims),"\n";
-
-	 my $coeffs = polyfit($mini_x, 
-			      $mini_mins, 
-			      $weight,
-			      $opt->{F_POLYNOMIAL}, 0);
-
-
-	 my($xv) = xvals($ims->dim(2));
-
-	 print "coeffs is ",join('x',$coeffs->dims),"\n";
-
-	 my($bkg) = $coeffs->(*1,(-1))->copy;
-	 my($ii);
-	 for($ii=$coeffs->dim(0)-2; $ii >= 0; $ii--) {
-	     $bkg *= $xv;
-	     $bkg += $coeffs->(*1,($i));
-	 }
-
-	 $out->{BKSUB_CUBE} -= $bkg->mv(0,2);
-     }
-
 
      unless(exists($out->{log})) {
 	 $out->{log} = [];

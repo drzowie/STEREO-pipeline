@@ -142,7 +142,8 @@ sub read_files {
     {
 	local($@);
 	eval q/use DBI;/;
-	if(  (!$@)  and   ($DBI::VERSION) and $opt->{FILE_STATUS_DB} ){
+	if($@ || !defined($DBI::VERSION)) { print "DBI didn't load - not shortcutting file status...\n" }
+	elsif( $opt->{FILE_STATUS_DB} ){
 	    $dbh = DBI->connect("dbi:SQLite:dbname=".$opt->{FILE_STATUS_DB},"","",{RaiseError=>0,AutoCommit=>1});
 	    unless($dbh) {
 		print STDERR "Couldn't connect to $opt->{FILE_STATUS_DB}, will check all files for validity";
@@ -163,7 +164,7 @@ sub read_files {
     if($dbh) {
 	print "** Found DB $opt->{FILE_STATUS_DB}; will shortcut file filtering\n";
     } else {
-	print "** Couldn't find DB $opt->{FILE_STATUS_DB}; will not shortcut file filtering\n";
+	print "** Couldn't open DBI::sqlite database $opt->{FILE_STATUS_DB}; will not shortcut file filtering\n";
     }
 
     print cards($opt);
