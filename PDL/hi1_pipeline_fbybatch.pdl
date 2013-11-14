@@ -152,11 +152,9 @@ sub hi1_pipeline_fbybatch {
 	my @subs = split /\//,$output_dir;
 	for my $i(0..$#subs) {
 	    my $dir = join("/",@subs[0..$i]);
-	    `mkdir $dir`;
+	    `mkdir $dir` unless(-e $dir);
 	}
     }
-
-    `mkdir $opt->{OUTPUT_DIR}`;
     $bk->fhdr->{HISTORY} = "F coronal model extracted from HI-1 batch $batchno, $opt->{'pct'} percentile";
     $bk->fhdr->{HISTORY} .= "(extracted at batch center time)";
     $bk->fhdr->{'CEN_TIME'} = $tstamp_center;
