@@ -31,7 +31,7 @@ to be organized in daily directories named in C<yyyymmdd> form.
 
 =item pct
 
-Percentile value to take as background (default 5)
+Percentile value to take as background (default 3)
 
 =back
 
@@ -54,7 +54,7 @@ sub hi2_pipeline_fbybatch {
 
 	BATCHLENGTH => 14,
 	BATCH_STEP  => 0.5,
-	CADENCE     => 40
+	CADENCE     => 120
     };
     for my $k(keys %$defaults) {
 	$opt->{$k} = $defaults->{$k} unless(exists($opt->{$k}));
