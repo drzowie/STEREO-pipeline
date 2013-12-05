@@ -386,7 +386,7 @@ sub read_files {
 	    for $i(0..$#{$in->{RAW_HDRS}}) {
 		my $sth;
 		unless($dbstatus[$i]) {
-		    $sth = $dbh->prepare(sprintf(q{INSERT INTO 'files' VALUES ('%s','%s')},
+		    $sth = $dbh->prepare(sprintf(q{INSERT INTO 'files' ('name','status') VALUES ('%s','%s')},
 						 $in->{RAW_HDRS}->[$i]->{'FILENAME'},
 						 $status[$i]//'ok'
 					 )
