@@ -31,7 +31,7 @@ to be organized in daily directories named in C<yyyymmdd> form.
 
 =item pct
 
-Percentile value to take as background (default 5)
+Percentile value to take as background (default 3)
 
 =back
 
