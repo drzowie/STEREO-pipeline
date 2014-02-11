@@ -92,7 +92,7 @@ sub motion_filter {
     $opt->{FILTER_SLOP}= 0.33           unless exists($opt->{FILTER_SLOP});
     $opt->{FILTER_APOD_FRAMES} = 3      unless exists($opt->{FILTER_APOD_FRAMES});
     $opt->{FILTER_APOD_MARGIN} = 20     unless exists($opt->{FILTER_APOD_MARGIN});
-    $opt->{FILTER_MASK_TRIGGER} = 0.667 unless exists($opt->{FILTER_MASK_TRIGGER});
+    $opt->{FILTER_MASK_TRIGGER} = 0     unless exists($opt->{FILTER_MASK_TRIGGER});
     $opt->{FILTER_CUTOFF_PPF} = 1       unless exists($opt->{FILTER_CUTOFF_PPF});
     $opt->{FILTER_MAX_SIZE}     = 50    unless exists($opt->{FILTER_MAX_SIZE});
     $opt->{FILTER_CUBE} = "CEL"         unless exists($opt->{FILTER_CUBE});
@@ -110,22 +110,42 @@ sub motion_filter {
     my $fc = $opt->{FILTER_CUBE}."_CUBE";
     my $fm = $opt->{FILTER_CUBE}."_MASK";
 
-    print "Apodizing...\n";
+    if($opt->{FILTER_MASK_TRIGGER}) {
+	print "motion_filter: Zapping outliers...\n";
+	
+    }
+
+
+
     print "fc is $fc\n";
-    $hash->{$fc}->where($hash->{$fc}->isbad) .= 0;
+    $hash->{$fm}->where($hash->{$fc}->isbad) .= 0;
     $hash->{$fc."_UNFILTERED"} = $hash->{$fc}->copy;
 
-    my $c3 = pdl(($hash->{$fm} * $hash->{$fc})->range( -$of,
-				       2*$of + pdl( $hash->{$fc}->dims ),
-				       'm'
-						       )->sever,
-		 0)->mv(-1,0);
+    print "Cleaning bad regions...\n";
+    if($opt->{FILTER_MASK_TRIGGER}) {
+	$hash->{$fm}->indexND( whichND( $hash->{$fc}->abs > $opt->{FILTER_MASK_TRIGGER} ) ) .= 0;
+    }
+
+    my $c2 = $hash->{$fc}->setbadif( $hash->{$fm}==0 );
+    clean_baddies($c2,1);
+
+    print "Padding...\n";
+    my $c3 = pdl( $c2->range( -$of,
+			      2*$of + pdl( $hash->{$fc}->dims ),
+			      'm'
+		  )->sever,
+		 0 
+	)->mv(-1,0);
+    undef $c2;
+
     my $c3r = $c3->((0));
     my $c3i = $c3->((1));
 
     print "of is $of\n";
     print "On initial range: c3 minmax is ".(join(",",$c3->minmax))."\n";
 
+
+    print "Apodizing...\n";
     ## Now apodize the edges with a smooth rolloff...
     my $margin_rolloff = sin( 3.14159 / 2 / $opt->{FILTER_APOD_MARGIN} * xvals($opt->{FILTER_APOD_MARGIN}) );
     $margin_rolloff *= $margin_rolloff;

@@ -1,5 +1,27 @@
 =head2 remove_polynomials - hi2 pipeline component
 
+=for ref
+
+This fits a polynomial to the time series of each pixel the given cube in the pipeline data structure, and
+subtracts it.  There are some options:
+
+=over 3
+
+=item POLY_PRESMOOTH - if set, this does a rowwise running-median followed by a columnwise running-median operation to remove stars and such, before generating the fit.
+
+=item MIN_SMOOTH_SIZE - the data are shifted to their minimum value at the end of the operation.  The MIN_SMOOTH_SIZE performs a rowwise/columnwise median on the minimum value plane before the subtraction.
+
+=item POLY_ORDER - the order of the polynomial (default is 3 -- cubic)
+
+=item POLY_CUBE - if present, this is the name of the cube to modify.  Default is CEL, which modifies CEL_CUBE.
+
+=item POLY_TRIM_PERCENTILE - if present, this trims some percentile of the max and min values from each time series before the fit.
+
+=item POLY_DOUBLESTUFF - if present, this trims the <n> percentile of outlier points that might be driving the fit away from the true background, and refits. 
+
+=back
+
+
 =cut
 use PDL::Slatec;
 use PDL::NiceSlice;
@@ -18,6 +40,7 @@ sub remove_polynomials {
     $opt->{POLY_ORDER} = 3 unless(exists($opt->{POLY_ORDER}));
     $opt->{POLY_CUBE} = "CEL" unless(exists($opt->{POLY_CUBE}));
     $opt->{POLY_TRIM_PERCENTILE} = 0 unless(exists($opt->{POLY_TRIM_PERCENTILE}));
+    $opt->{POLY_DOUBLESTUFF} = 0 unless(exists($opt->{POLY_DOUBLESTUFF}));
 
     my $pc = $opt->{POLY_CUBE}."_CUBE";
     my $cube = $hash->{$pc};
@@ -77,28 +100,48 @@ sub remove_polynomials {
 
 	my $eps = 0;
 	print "c3 is ".join("x",$c3->dims)."\n";
-	our($ndeg, $r, $ierr, $a) = polyfit( xvals($c3->dim(0)), $c3, ones($c3->dim(0)), $opt->{POLY_ORDER}, $eps );
+	my($ndeg, $r, $ierr, $a) = polyfit( xvals($c3->dim(0)), $c3, ones($c3->dim(0)), $opt->{POLY_ORDER}, $eps );
 	undef $ierr;
 	undef $a;
 	undef $ndeg;
+
+	if($opt->{POLY_DOUBLESTUFF}) {
+	    my $c4_num = (  ($opt->{POLY_DOUBLESTUFF} / 100) * $c3->dim(0) );
+	    print "c3 is ".join("x",$c3->dims)."\n";
+	    print "remove_polynomials: POLY_DOUBLESTUFF=$opt->{POLY_DOUBLESTUFF}: rejecting worst $c4_num points from each timeseries...\n";
+	    our $c4 = (-($c3 - $r)->abs)->qsorti;
+	    my $c3foo = $c3->index1d($c4);
+
+	    $c3foo->(0:$c4_num) .= $c3->badvalue;
+	    our @z;
+	    our @r;
+	    push(@r,$r);
+	    push(@z,$c3);
+	    ($ndeg, $r, $ierr, $a) = polyfit( xvals($c3->dim(0)), $c3, ones($c3->dim(0)), $opt->{POLY_ORDER}, $eps );
+	    undef $ierr;
+	    undef $a;
+	    undef $ndeg;
+	}
+
+	$r -= $r->minimum->(*1);
 	$r->where($r->isbad) .= 0;
 	$cube->mv(2,0)->(:,:,$min:$max) -= $r;
     }
     print "\n";
 
-    # accumulate minimum so as not to eat too much memory...
-    print "Accumulating minimum....";
-    my $ones = ones(1, $opt->{MIN_SMOOTH_SIZE});
-    my $min = $cube->(:,:,(0))->med2d( $ones )->med2d($ones->mv(1,0))->(:,:,*2)->copy;
-    for my $i(1..$cube->dim(2)-1) {
-	print "$i...";
-	$min->(:,:,(1)) .= $cube->(:,:,($i))->med2d( $ones )->med2d($ones->mv(1,0));
-	$min->(:,:,(0)) .= $min->mv(2,0)->minimum;
-    }
-    our $c_2 = $cube->copy;
-
-    print "subtracting minimum smoothed value...\n";
-    $cube -= $min->(:,:,(0));
+#    # accumulate minimum so as not to eat too much memory...
+#    print "Accumulating minimum....";
+#    my $ones = ones(1, $opt->{MIN_SMOOTH_SIZE});
+#    my $min = $cube->(:,:,(0))->med2d( $ones )->med2d($ones->mv(1,0))->(:,:,*2)->copy;
+#    for my $i(1..$cube->dim(2)-1) {
+#	print "$i...";
+#	$min->(:,:,(1)) .= $cube->(:,:,($i))->med2d( $ones )->med2d($ones->mv(1,0));
+#	$min->(:,:,(0)) .= $min->mv(2,0)->minimum;
+#    }
+#    our $c_2 = $cube->copy;
+#
+#    print "subtracting minimum smoothed value...\n";
+#    $cube -= $min->(:,:,(0));
  
     return $hash;
 }

@@ -144,7 +144,7 @@ sub null_stars {
     my $usm = $hash->{CEL_CUBE}->copy;
     my $i;
     for $i(0..$usm->dim(2)-1){
-    	$usm->(:,:,($i)) .= $hash->{CEL_CUBE}->(:,:,($i))->convolveND($k,bound=>'e');
+    	$usm->(:,:,($i)) .= $hash->{CEL_CUBE}->(:,:,($i))->convolveND($k,bound=>'e')->abs;
     }
     $usm /= $bkg;
 
@@ -179,34 +179,35 @@ sub null_stars {
     # Now median-smooth the remainder.
     print "null_stars: median-smoothing...\n";
     my $smooth;
-    if( ref $opt->{NULL_SMOOTH_SIZE} ) {
-	$smooth = ones(pdl($opt->{NULL_SMOOTH_SIZE})->list);
-    } else {
-	$smooth = ones($opt->{NULL_SMOOTH_SIZE},$opt->{NULL_SMOOTH_SIZE});
-    }
-
-    my $nframes = int ( ($opt->{NULL_SMOOTH_FRAMES}-1)/2 ) * 2.0 + 1;
-
-    if($nframes <= 1) {
-	print "smooth is ",join("x",$smooth->dims);    
-	for $i(0..$hash->{CEL_CUBE}->dim(2)-1) {
-	    $hash->{CEL_CUBE}->(:,:,($i)) .= $hash->{CEL_CUBE}->(:,:,($i))->med2d($smooth);
-	    print ".";
+    if($opt->{NULL_SMOOTH_SIZE}) {
+	if( ref $opt->{NULL_SMOOTH_SIZE} ) {
+	    $smooth = ones(pdl($opt->{NULL_SMOOTH_SIZE})->list);
+	} else {
+	    $smooth = ones($opt->{NULL_SMOOTH_SIZE},$opt->{NULL_SMOOTH_SIZE});
 	}
-	print "\n";
-    } else {
-	print "nframes=$nframes\n";
-	# Smooth across frames too
-	my $c2 = $hash->{CEL_CUBE}->copy;
-	for $i(0..$hash->{CEL_CUBE}->dim(2)-1) {
-	    my $plane = $c2->range( ndcoords($smooth->dim(0), $smooth->dim(1), $nframes) - pdl($smooth->dim(0)/2,$smooth->dim(1)/2,$nframes/2)->floor + pdl(0,0,$i), 
-				    [$c2->dim(0), $c2->dim(1), 0], 'e'
-		)->clump(3)->medover;
-	    print "$i: plane is ".join("x",$plane->dims)."\n";
-	    $hash->{CEL_CUBE}->(:,:,($i)) .= $plane;
+	
+	my $nframes = int ( ($opt->{NULL_SMOOTH_FRAMES}-1)/2 ) * 2.0 + 1;
+	
+	if($nframes <= 1) {
+	    print "smooth is ",join("x",$smooth->dims);    
+	    for $i(0..$hash->{CEL_CUBE}->dim(2)-1) {
+		$hash->{CEL_CUBE}->(:,:,($i)) .= $hash->{CEL_CUBE}->(:,:,($i))->med2d($smooth);
+		print ".";
+	    }
+	    print "\n";
+	} else {
+	    print "nframes=$nframes\n";
+	    # Smooth across frames too
+	    my $c2 = $hash->{CEL_CUBE}->copy;
+	    for $i(0..$hash->{CEL_CUBE}->dim(2)-1) {
+		my $plane = $c2->range( ndcoords($smooth->dim(0), $smooth->dim(1), $nframes) - pdl($smooth->dim(0)/2,$smooth->dim(1)/2,$nframes/2)->floor + pdl(0,0,$i), 
+					[$c2->dim(0), $c2->dim(1), 0], 'e'
+		    )->clump(3)->medover;
+		print "$i: plane is ".join("x",$plane->dims)."\n";
+		$hash->{CEL_CUBE}->(:,:,($i)) .= $plane;
+	    }
 	}
-    }
-
+    }	
     push(@{$hash->{log}}, "  null_stars v$VERSION");
     return $hash;
 	

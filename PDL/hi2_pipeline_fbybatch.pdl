@@ -52,6 +52,7 @@ sub hi2_pipeline_fbybatch {
 
 	OUTPUT_DIR => 'F/%s/hi_2',
 
+	MEDIAN      => 15,
 	BATCHLENGTH => 14,
 	BATCH_STEP  => 0.5,
 	CADENCE     => 120
@@ -146,6 +147,10 @@ sub hi2_pipeline_fbybatch {
     my $sm = $opt->{'sm'} || 1;
     my $bk = extract_minimum($ims, {n_min => $sn, reach=>($sm-1)/2});
     
+    if($opt->{MEDIAN}) {
+	$bk = $bk->med2d(rvals($opt->{MEDIAN}*2+1) < $opt->{MEDIAN});
+    }
+
     # Create the output directory and its subdirs
     my $output_dir = sprintf($opt->{OUTPUT_DIR},$opt->{HI2_SC});
     unless(-e $output_dir) {
@@ -155,8 +160,12 @@ sub hi2_pipeline_fbybatch {
 	    `mkdir $dir` unless(-e $dir);
 	}
     }
+
     $bk->fhdr->{HISTORY} = "F coronal model extracted from HI-1 batch $batchno, $opt->{'pct'} percentile";
     $bk->fhdr->{HISTORY} .= "(extracted at batch center time)";
+    if($opt->{MEDIAN}) { 
+	$bk->fhdr->{HISTORY} .= "(Median-filtered: radius=$opt->{MEDIAN} pixels)";
+    }
     $bk->fhdr->{'CEN_TIME'} = $tstamp_center;
     $bk->fhdr->{'ST_TIME'} = $hash->{RAW_HDRS}->[0]->{'DATE-OBS'};
     $bk->fhdr->{'EN_TIME'} = $hash->{RAW_HDRS}->[-1]->{'DATE-OBS'};

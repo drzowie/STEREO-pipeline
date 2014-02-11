@@ -108,10 +108,11 @@ sub shift_to_celestial {
 				      ]
 	);
     
-    our $master_patch = ($hash->{'BKSUB_CUBE'}->(:,:,($dex0)) * $hash->{'MASK_CUBE'}->(:,:,($dex0))) -> map(
+    my $blur=2;
+    my $master_patch = ($hash->{'BKSUB_CUBE'}->(:,:,($dex0)) * $hash->{'MASK_CUBE'}->(:,:,($dex0))) -> map(
 	$t_patchcrop, 
 	\@align_patchsize,
-	{method=>$opt->{'INTERP_METHOD'},pix=>1,blur=>1.5}
+	{method=>$opt->{'INTERP_METHOD'},pix=>1,blur=>$blur}
 	);
 
     
@@ -139,7 +140,7 @@ sub shift_to_celestial {
 		our $newpatch = ($hash->{'BKSUB_CUBE'}->(:,:,($i)) * $hash->{'MASK_CUBE'}->(:,:,($i)))->map(
 		    $t_z x $t_patchcrop x !$t_nl x $t_o x $t_nl,
 		    \@align_patchsize,
-		    {method=>$opt->{'INTERP_METHOD'},pix=>1,blur=>1.5}
+		    {method=>$opt->{'INTERP_METHOD'},pix=>1,blur=>$blur}
 		    );
 		my $p0 = $master_patch->clump(2);
 		my $p1 = $newpatch->clump(2);

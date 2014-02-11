@@ -25,6 +25,7 @@ sub hi2_pipeline {
 
 	F_POLYNOMIAL => 0,
 	F_MINI => 0,
+	USE_F_MODEL => 0,
 	
 	DEBUG_OUTPUT_PREFIX => "",
 	FINAL_POLY_STEP => 0,
@@ -32,7 +33,9 @@ sub hi2_pipeline {
 	
 	DIST_MIN_PCORR => 0.9,
 	DIST_CORRTIME => 5,
-	DIST_CORR_RSIZE => 10
+	DIST_CORR_RSIZE => 10,
+
+	PIXEL_YRANGE => pdl(15,1009)
     };
 
     for my $k(keys %{$opt_defaults}) {
