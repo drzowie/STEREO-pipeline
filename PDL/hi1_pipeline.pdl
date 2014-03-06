@@ -31,6 +31,8 @@ Options accepted and acted on by hi1_pipeline itself are:
 
 =item KEEP_NULLED (default 1) - a flag: whether to keep (and save) NULLED data as well as fully processed.
 
+=item PIPELINE_MOVIES (default 0) - a flag: if nonzero, then generate movie directories for debugging or demo
+
 =back
 
 The steps applied are:
@@ -236,10 +238,12 @@ sub hi1_pipeline {
     my $datestr = time2str("%Y-%m-%dT%H:%M:%SZ",time,"Z");
 
     if($opt->{KEEP_NULLED}) {
-	local($hash->{log});
-	print "Shift nulled data to instrument coords...\n";
+	## Make a branch of the operations log -- it will revert after this block finishes.
+	local($hash->{log});  
 
+	print "Shift nulled data to instrument coords...\n";
 	shift_to_instrument($hash,$opt);
+
 	movie_from_cube($hash->{CLEAN_CUBE},{fname=>"f-%3.3d.png",
 					   topt=>{size=>[14,11]},
 					   popt=>{j=>1,clut=>'sepia',cbr=>[0,3e-13]},
@@ -259,6 +263,7 @@ sub hi1_pipeline {
 	    print "Removing polynomials from NULLED (S) cube...\n";
 	    remove_polynomials($hash, {%$opt, POLY_CUBE=>'NULLED', POLY_TRIM_PERCENTILE=>10 });
 	}
+
 	movie_from_cube($hash->{NULLED_CUBE},{fname=>"f-%3.3d.png",
 				       topt=>{size=>[14,11]},
 				       popt=>{j=>1,clut=>'sepia',cbr=>[0,2e-13]},
@@ -273,7 +278,7 @@ sub hi1_pipeline {
 	if($opt->{OUTPUT_FILES}) {
 	    `mkdir $opt->{OUTPUT_DIR}-S`;
 	    for $i(0..$hash->{NULLED_CUBE}->dim(2)-1) {
-		my $im = $hash->{NULLED_CUBE}->(:,:,($i));
+		my $im = float( $hash->{NULLED_CUBE}->(:,:,($i)) );
 		
 		# Deep copy the FITS header to save the contents for later...
 		my $hdr = new Astro::FITS::Header( Cards => [(tied %{$hash->{RAW_HDRS}->[$i]})->cards] );
@@ -381,7 +386,7 @@ sub hi1_pipeline {
     if($opt->{OUTPUT_FILES}) {
         `mkdir $opt->{OUTPUT_DIR}-M`;
 	for $i($opt->{CLEAN_MARGIN_FRAMES}..$hash->{CLEAN_CUBE}->dim(2)-1-$opt->{CLEAN_MARGIN_FRAMES}) {
-	    my $im = $hash->{CLEAN_CUBE}->(:,:,($i))->copy;
+	    my $im = float( $hash->{CLEAN_CUBE}->(:,:,($i)) );
 
 	    $im->sethdr($hash->{RAW_HDRS}->[$i]);
 	    $im->hdr->{DATE} = $datestr;

@@ -30,6 +30,7 @@ sub remove_polynomials {
     my $hash = shift;
     my $opt = shift;
     my $inst_cube = shift || 0;
+    my $VERSION = "2.3 1-Mar-2013";
 
     print "into remove_polynomials...\n";
 
@@ -129,19 +130,10 @@ sub remove_polynomials {
     }
     print "\n";
 
-#    # accumulate minimum so as not to eat too much memory...
-#    print "Accumulating minimum....";
-#    my $ones = ones(1, $opt->{MIN_SMOOTH_SIZE});
-#    my $min = $cube->(:,:,(0))->med2d( $ones )->med2d($ones->mv(1,0))->(:,:,*2)->copy;
-#    for my $i(1..$cube->dim(2)-1) {
-#	print "$i...";
-#	$min->(:,:,(1)) .= $cube->(:,:,($i))->med2d( $ones )->med2d($ones->mv(1,0));
-#	$min->(:,:,(0)) .= $min->mv(2,0)->minimum;
-#    }
-#    our $c_2 = $cube->copy;
-#
-#    print "subtracting minimum smoothed value...\n";
-#    $cube -= $min->(:,:,(0));
- 
+    unless(exists($hash->{log})) {
+	$hash->{log} = [];
+    } 
+    push(@{$hash->{log}}, "  remove_polynomials v$VERSION");
+    
     return $hash;
 }

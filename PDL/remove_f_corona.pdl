@@ -96,7 +96,7 @@ use Date::Format;
 
 sub remove_f_corona {
      local($PDL::BIGPDL) = 1;
-     my $VERSION = "2.2 28-Jun-2013";
+     my $VERSION = "2.3 1-Mar-2013";
      my $i;
 
      # Read parameters
@@ -204,6 +204,11 @@ sub remove_f_corona {
 	 }
 	 print "\n";
 
+	 unless(exists($in->{log})) {
+	     $in->{log} = [];
+	 }
+	 push(@{$in->{log}}, "  remove_f_corona (with F model) v$VERSION");
+
 	 return $in;
      }
 
@@ -217,18 +222,17 @@ sub remove_f_corona {
      my $sm = $opt->{'sm'} || 1;
      my $bk = extract_minimum($ims, {n_min => $sn, reach=> ($sm-1)/2 });
 
-     my $out = $in;
-     $out->{FBK} = $bk if($opt->{KEEP_FCORONA});
-     $out->{BKSUB_CUBE} = $ims - $bk;
+     $in->{FBK} = $bk if($opt->{KEEP_FCORONA});
+     $in->{BKSUB_CUBE} = $ims - $bk;
      undef $ims;
      undef $bk;
 
-     unless(exists($out->{log})) {
-	 $out->{log} = [];
-     }
 
-     push(@{$out->{log}},"  remove_f_corona v$VERSION");
+     unless(exists($in->{log})) {
+	 $in->{log} = [];
+     }
+     push(@{$in->{log}},"  remove_f_corona (no premade F model) v$VERSION");
 
      print "returning from remove_f_corona...\n";     
-     return $out;
+     return $in;
 }

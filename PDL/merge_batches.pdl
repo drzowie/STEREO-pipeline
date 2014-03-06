@@ -16,6 +16,44 @@ in two or more batch files; near the transition a given batch is ramped
 up smoothly via Hanning window (by default, this smoothing region is 40
 pixels wide; you can set it with the "MARGIN" option).
 
+Options processed by merge_batches are:
+
+=over 3
+
+=item MERGED_DIR (default = "L2")
+
+The directory in which to place the merged files
+
+=item PROCESSES (default = 8)
+
+How many separate processes to run, one file per process
+
+=item MARGIN (default=40)
+
+This is the size of the Hanning margin in which the weight of a given
+batch file is rolled to zero.  It smoothes the boundaries between batches
+in the output data.
+
+=item START (default=0)
+
+This is the index of the first file to write, in the array of potential output files.
+
+=item REGEXP (default='clean\-(.*)\-\-BATCH.*')
+
+This is a regexp that input file names must match, to be detected for merging.
+
+=item PTYPE (default='')
+
+If present, this should be a single character (e.g. 'S' or 'M') indicating the 
+type of L2 processing that was performed on the files being merged.  It's used for
+HI-1 pipeline processing.
+
+=item BAD_THRESH (default=1000)
+
+Pixels with an absolute value larger than this are treated as BAD values and ignored.
+
+=back
+
 =cut
 
 use strict;
@@ -24,7 +62,7 @@ use Date::Format;
 sub merge_batches {
     my $files = shift;
     my $opt = shift;
-    my $VERSION = "2.2 29-May-2013";
+    my $VERSION = "2.3 1-Mar-2014";
     
     $opt = {} unless defined($opt);
     $opt->{MERGED_DIR} = "L2" unless(defined $opt->{MERGED_DIR});
@@ -62,6 +100,9 @@ sub merge_batches {
     }
 
     # Now the filenames have been sorted.  Begin accumulating.
+    # This is slightly complicated by the fact that we run several accumulations in parallel.  The 
+    # main loop spawns out several daughter processes, each of which writes one file.
+    # It also maintains a certain number of active processes, reaping their statuses as they expire.
 
     my %pids = ();
 
@@ -144,15 +185,13 @@ sub merge_batches {
 		    
 		    ##############################
 		    # Add new header fields
-		    $hdr->{COMMENT} .= "Background model removed; some stars and artifacts may remain\n";
-		    $hdr->{HISTORY} .= "Merged batches with merge_batch $VERSION\n";
-		    $hdr->{HISTORY} .= "Removed background model (SwRI pipeline; PDL) CED\n   (Some artifacts may remain)";
+		    $hdr->{HISTORY} .= "Merged ".(0+@cube)." batches with merge_batch v$VERSION\n";
 		    $hdr->{ORIGIN}  = 'SwRI (contact: deforest@boulder.swri.edu) / Post-processed at SwRI';
 
 		    $hdr->{DATE} = time2str("%Y-%m-%dT%H:%M:%S",time,'Z');
 		    my $ptype = $opt->{PTYPE};
 		    $hdr->{FILENAME} = $out_fname;
-
+		    $avg = float($avg);
 		    $avg->sethdr($hdr);
 		    print "writing $mfname\n";
 		    wfits( $avg, $mfname);
