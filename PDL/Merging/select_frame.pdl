@@ -1,0 +1,95 @@
+=head2 select_frame
+
+=for usage
+
+ @headers = map { rfits($_, {data=>0}) } @filenames;
+ $frame_from_datestring = select_frame(\@headers, "2008-12-31 11:45");
+ $frame_from_unixtime   = select_frame(\@header, 1230723900);
+ $frames_from_unixtimes = select_frame(\@header, xvals(100)*3600+1230723900);
+
+=for ref
+
+select_frame - given a time and a collection of images, return the
+index of the one closest to the given time (in UTC), or the indices
+of multiple frames at the range of given times.
+
+You can feed in  a datestring (interpreted as a UT timestamp); an array ref of 
+datestrings; or a PDL (interpreted as one or more UT UNIX times, and threaded over).
+
+Each header is modified to contain a field "UTIMEOBS" with the UNIX
+time of the observation, if that field doesn't exist.  The supplied
+headers should have a valid 'DATE-OBS' field.
+
+Options:
+
+You can also pass in an option hash.  Accepted options are:
+
+=over 3
+
+=item bound (default 'e')
+
+May be 'e' for 'extend', or 'f' for 'forbid'.  If 'forbid' is selected, then 
+out-of-bounds times cause the BAD valueto be returned.  Otherwise the closest
+is returned regardless of whether the selected time is outside the data range.
+
+=back
+
+=cut
+
+use Date::Parse;
+use PDL::Options;
+use PDL::NiceSlice;
+
+sub select_frame {
+    my $headers = shift;
+    my $ftimes = shift;
+    my $u_opt = shift // {};
+    
+    my %opt = parse( 
+	{ bound=>'e' },
+	$u_opt
+	);
+
+    unless($opt{bound} =~ m/^[ef]/i) {
+	die "select_frame: boundary condition must be 'extend' or 'forbid'";
+    }
+
+    ##########
+    # Parse out the data times
+    my @times = map {
+	my $h = $_;
+	unless( exists($h->{'UTIMEOBS'}) ) {
+	    $h->{'UTIMEOBS'} = str2time($h->{'DATE-OBS'},'UT');
+	}
+	$h->{'UTIMEOBS'};
+    } @$headers;
+    my $datatimes = pdl(@times);
+
+    ##########
+    # Parse out the supplied frame times
+    unless(ref($ftimes)) {
+	$ftimes = [$ftimes];
+    }
+    if(ref($ftimes) eq 'ARRAY') {
+	my @ft2 = map { str2time($_,'UT') } @$ftimes;
+	$ftimes = pdl(@ft2);
+    }
+    if(ref($ftimes) ne 'PDL') {
+	die 'select_frame: must supply a scalar, array ref, or PDL';
+    }
+    
+    ##########
+    # Now find the time differences...
+    my $tdiff = abs( $ftimes(*1) - $datatimes );
+    my $dex = $tdiff->minimum_ind;
+    
+    # If the boundary condition is 'f'
+    if($opt{bound} =~ m/^f/i) {
+	$dex = $dex->setbadif( ($ftimes < $datatimes->minimum) | ( $ftimes > $datatimes->maximum ) );
+    }
+
+
+    return $dex;
+}
+
+    

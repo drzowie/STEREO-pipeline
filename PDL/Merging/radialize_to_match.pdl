@@ -1,0 +1,138 @@
+=head2 radialize_to_match
+
+=for usage 
+
+ $matching = radialize_to_match( $input, $working, $opt );
+
+=for ref
+
+Conformally transform a single FITS file, normalize it radially, and drop it onto a workspace.
+
+if $working is a FITS header, it gets allocated as a PDL and returned.  If it is a PDL it gets written on and returned.
+
+The FITS header for $working should have horizontal units of degrees-azimuth and vertical units of log10 degrees-radius.
+
+
+Options are:
+
+=over 3
+
+=item r_range 
+
+Array ref.  Given in degrees from Sun center to be overwritten by this file.  
+Default is [0,90], which is almost certainly nonsensical.
+
+=item az_range
+
+Array ref.  Given in degrees from due West.  Default is [135,225], which may be sensible
+
+=item radialize
+
+some combination of 'mean' and 'variance'. Default is 'variance'. 'm' and 'v' are pattern-matched.
+
+=item premed
+
+If this is a number, then the input is presmoothed by median-filtering over that *radius* circles in the original input.
+Happens *pre* smooth.
+
+=item presmooth
+
+If this is a number, then the input is presmoothed by convolving over a Gaussian with that half-width.
+Happens *post* median.
+
+=back
+
+=cut
+
+use PDL::NiceSlice;
+use PDL::Transform;
+use PDL::Options;
+use Physics::Unit;
+
+sub radialize_to_match {
+
+    my $image = shift;
+    my $working = shift;
+    my $u_opt = shift // {};
+
+    my %opt = parse( {
+	r_range=>[0.25,90],
+	az_range=>[135,225],
+	radialize => 'variance',
+	premed=>undef,
+	presmooth=>undef,
+	badthresh=>10,
+		     },
+		     $u_opt
+	);
+
+
+    unless(ref($working) eq 'PDL' && $working->hdr->{NAXIS1}) {
+	if((ref($working) eq 'HASH') && $working->{NAXIS1}) {
+	    my $w = zeroes($working->{NAXIS1} // 500, $working->{NAXIS2} // 500);
+	    $w->sethdr($working);
+	} else {
+	    @size = (ref($working) eq 'ARRAY') ? @$working : (500,500);
+	    $working = zeroes(@size);
+	    $working->fhdr->{NAXIS} = 2;
+	    $working->fhdr->{NAXIS1} = $size[0];
+	    $working->fhdr->{NAXIS2} = $size[1];
+	    
+	    $working->fhdr->{CTYPE1} = "azimuth";
+	    $working->fhdr->{CUNIT1} = "degree";
+	    $working->fhdr->{CDELT1} = ($opt{az_range}->[1] - $opt{az_range}->[0]) / $size[0];
+	    $working->fhdr->{CRPIX1} = 1 + $size[0]/2;
+	    $working->fhdr->{CRVAL1} = ($opt{az_range}->[1]+$opt{az_range}->[0])/2;
+	    
+	    $working->fhdr->{CTYPE2} = "radius";
+	    $working->fhdr->{CUNIT2} = "log_{10} degrees";
+	    $working->fhdr->{CDELT2} = (log10($opt{r_range}->[1]) - log10($opt{r_range}->[0])) / $size[1];
+	    $working->fhdr->{CRPIX2} = 1;
+	    $working->fhdr->{CRVAL2} = log10($opt{r_range}->[0]);
+	}
+    }
+    $PDL::working = $working;
+    
+    if($opt{premed}) {
+	my $r = rvals($opt{premed}*2+1) <= $opt{premed};
+	$image = $image->med2d($r);
+    }
+
+    if($opt{presmooth}) {
+	my $r = rvals($opt{presmooth} * 4 + 1);
+	my $k = exp(- $r * $r / $opt{presmooth} / $opt{presmooth});
+	$k /= $k->sum;
+	$image = $image->convolveND($k);
+    }
+    
+    my $scale = units(1, $image->hdr->{CUNIT1}, "deg");
+    unless(defined($scale)) {
+	print "Couldn't convert image units '$image->hdr->{CUNIT1}' to degrees -- winging it (assuming arcsec)\n";
+	$scale = units(1,'arcsec','deg');
+    }
+
+    ##############################
+    # Generate transform and remap the image
+    my $t = t_scale([180/3.14159, 1.0/log(10)]) x t_radial(r0=>1.0) x t_scale($scale);
+    my $foo = $image->map($t, $working, {method=>'j'});
+
+    ############################## 
+    # Radialize if called-for
+    if($opt{badthresh}) {
+	$foo = $foo->setbadif($foo->abs > $opt{badthresh});
+    }
+    if($opt{radialize} =~ m/m/i) {
+	$foo -= $foo->medover->(*1);
+    }
+    if($opt{radialize} =~ m/v/i) {
+	$foo /= sqrt(($foo*$foo)->medover->(*1));
+    }
+    my $tf = t_fits($working);
+    my $r_lower = pdl($opt{az_range}->[0],log10($opt{r_range}->[0]))->apply(!$tf);
+    my $r_upper = pdl($opt{az_range}->[1],log10($opt{r_range}->[1]))->apply(!$tf);
+
+    $working->range($r_lower,$r_upper-$r_lower,'e') .= $foo->range($r_lower,$r_upper-$r_lower,'e');
+    return $working;
+}
+
+
