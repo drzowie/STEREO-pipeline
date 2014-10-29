@@ -30,12 +30,25 @@ sub hi2_pipeline {
 	DEBUG_OUTPUT_PREFIX => "",
 	FINAL_POLY_STEP => 0,
 	FINAL_ZERO_STEP => 0,
+
+	NULL_SMOOTH_FRAMES=>1,
+	NULL_SMOOTH_SIZE=>[13,7],
+	NULL_MIN_PCT=>5,
+	NULL_BADVAL_THRESH=>3,
+
+	MASK_RADIUS=>520,
+	MASK_HI2_STRIP=> $opt->{HI2_SC},
+	PIXEL_XRANGE=>pdl(0,1023),
+	PIXEL_YRANGE=>pdl(0,1023),
+	MARK_BAD=>1,
 	
 	DIST_MIN_PCORR => 0.9,
 	DIST_CORRTIME => 5,
 	DIST_CORR_RSIZE => 10,
 
-	PIXEL_YRANGE => pdl(15,1009)
+	PIXEL_YRANGE => pdl(15,1009),
+
+
     };
 
     for my $k(keys %{$opt_defaults}) {
@@ -49,6 +62,7 @@ sub hi2_pipeline {
     print "\n\n";
 
     our $hash = read_files($in_list, $opt);
+    
     
     remove_f_corona($hash, $opt);
 
@@ -112,11 +126,29 @@ sub hi2_pipeline {
         remove_polynomials($hash,$opt);
     }
 
+    if($opt->{DEBUG_PIPELINE}) {
+	print "Dumping post-final-poly cube to $opt->{DEBUG_OUTPUT_PREFIX}cel4.fits\n";
+	wfits( $hash->{CEL_CUBE}, $opt->{DEBUG_OUTPUT_PREFIX}."cel4.fits" );
+    }
+    
+
+
     if($opt->{FINAL_ZERO_STEP}) {
 	final_zero($hash);
     }
 
+    if($opt->{DEBUG_PIPELINE}) {
+	print "Dumping post-final-zero cube to $opt->{DEBUG_OUTPUT_PREFIX}cel5.fits\n";
+	wfits( $hash->{CEL_CUBE}, $opt->{DEBUG_OUTPUT_PREFIX}."cel5.fits" );
+    }
+    
+
     shift_to_instrument($hash,$opt);
+
+    if($opt->{DEBUG_PIPELINE}) {
+	print "Dumping instrument cube to $opt->{DEBUG_OUTPUT_PREFIX}output.fits\n";
+	wfits( $hash->{CLEAN_CUBE}, $opt->{DEBUG_OUTPUT_PREFIX}."output.fits");
+    }
 
     # Dump output to files...
     `mkdir $opt->{OUTPUT_DIR}`;

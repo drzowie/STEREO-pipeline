@@ -29,7 +29,7 @@ If more than 10% of the values are BAD on entry, C<clean_baddies> throws an exce
 sub clean_baddies {
     my $cube  =shift;
     my $crossframes = shift;
-    my $maxn = shift // 50;
+    my $maxn = shift // 20;
     my $max_pct = shift // 33;
     my $badplaces;
 
@@ -54,5 +54,10 @@ sub clean_baddies {
 	my $vals = $cube->range($badplaces,0,'e');
 	$vals .= $loci->clump(3)->medover;
     } until ($badplaces->nelem == 0 or (--$maxn <= 0));
+
+    if($badplaces->nelem) { 
+	print  STDERR "clean_baddies:  bad values left over.  Setting them all to 0....";
+	$cube->indexND($badplaces) .= 0;
+    }
     return $cube;
 }

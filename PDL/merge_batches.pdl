@@ -157,7 +157,7 @@ sub merge_batches {
 		    my @cube = mrfits(@{$filenames{$f}});
 		    my $cube = pdl(@cube)->mv(-1,0)->sever;
 		    my $hdr = $cube[0]->gethdr;
-		    undef @cube;
+		    my $ncube = 0+@cube;
 		    
 		    my $baddies = !($cube->isfinite->short & ($cube->abs < $opt->{BAD_THRESH}) );  # actual baddies
 		    $cube->where($baddies) .= 0;  	      # Mask out the bad values in the original cube so they don't cause trouble later
@@ -185,7 +185,7 @@ sub merge_batches {
 		    
 		    ##############################
 		    # Add new header fields
-		    $hdr->{HISTORY} .= "Merged ".(0+@cube)." batches with merge_batch v$VERSION\n";
+		    $hdr->{HISTORY} .= "Merged $ncube batches with merge_batch v$VERSION\n";
 		    $hdr->{ORIGIN}  = 'SwRI (contact: deforest@boulder.swri.edu) / Post-processed at SwRI';
 
 		    $hdr->{DATE} = time2str("%Y-%m-%dT%H:%M:%S",time,'Z');

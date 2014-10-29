@@ -92,6 +92,10 @@ Points with values higher than MASK_THRESH are marked BAD if the MARK_BAD flag i
 This is useful for HI-2 data.  Points outside the specified radius are marked bad. Set
 this to 0 to disable it.
 
+=item MASK_HI2_STRIP - mask out the occulter in the HI-2 fields of view
+
+Set nonzero to mask it out.
+
 =item IMG_SIZE - require an image dimension
 
 Images whose height or width is different from IMG_SIZE are rejected.
@@ -118,6 +122,7 @@ sub read_files {
 	neg=>'bad',
 	MASK_THRESH => 500,
 	MASK_RADIUS => 0,
+	MASK_HI2_STRIP => 0,
 	MARK_BAD    => 1,
 	IMG_SIZE    => 1024,
 	REJECT_BY_SUM => 0.03,
@@ -438,7 +443,6 @@ sub read_files {
 
      print "Making badval masks...\n";
      $out->{MASK_CUBE} = ones(byte, $out->{RAW_CUBE}->dims);
-
 	 
      if($opt->{MARK_BAD}) {
 	 print "marking bad points...\n";
@@ -451,9 +455,12 @@ sub read_files {
 	     $out->{MASK_CUBE}->(:,:,($i)) .= $m > 0.999 ;
 	     print "$i ";
 	 }
-	 
-	 $out->{RAW_CUBE} = $out->{RAW_CUBE}->setbadif(!$out->{MASK_CUBE});
 
+	 ## Mask out the out-of-limits valus inside the image, and interpolate inward.
+	 $out->{RAW_CUBE} = $out->{RAW_CUBE}->setbadif(!$out->{MASK_CUBE});
+	 clean_baddies($out->{RAW_CUBE},0,100,50);
+
+	 # Now mask out more points...
 	 if($opt->{MASK_RADIUS}) {
 	     print "mask_radius is $opt->{MASK_RADIUS}\n";
 	     my $rvm =  ( rvals($out->{RAW_CUBE}->(:,:,(0))) < $opt->{MASK_RADIUS} )->byte;
@@ -462,7 +469,23 @@ sub read_files {
 	 }
 
 
-	 clean_baddies($out->{RAW_CUBE},0,100,50);
+	 if($opt->{MASK_HI2_STRIP}) {
+	     print "mask_hi2_strip - masking '$opt->{MASK_HI2_STRIP}'\n";
+	     my $stripmask = zeroes(byte,$out->{RAW_CUBE}->(:,:,(0))->dims);
+	     if($opt->{MASK_HI2_STRIP} =~ m/a/i) {
+		 $stripmask .= (xvals($out->{RAW_CUBE}->(:,:,(0))) >= 230) | ((yvals($out->{RAW_CUBE}->(:,:,(0)))-504)->abs >= 70);
+	     }
+	     elsif($opt->{MASK_HI2_STRIP} =~ m/b/i) {
+		 print STDERR "WARNING: read_files: STEREO-B HI2 stripmask magic numbers may not be correct\n";
+		 $stripmask .= (xvals($out->{RAW_CUBE}->(:,:,(0))) < 1024-230) | ((yvals($out->{RAW_CUBE}->(:,:,(0)))-504)->abs >= 70);
+	     } else {
+		 print STDERR "WARNING: read_files: MASK_HI2_STRIP must be 'A' or 'B' -- ignoring...\n";
+		 $stripmask .= ones($out->{RAW_CUBE}->(:,:,(0)));
+	     }
+	     $out->{MASK_CUBE} &= $stripmask->byte;
+	     $out->{RAW_CUBE}->indexND(0+whichND($stripmask==0)) .= 0;
+	 }
+	 
 	 print "\n";
      }
 
@@ -470,6 +493,5 @@ sub read_files {
     print "returning: cube is ".join("x",$ims->dims)."\n\n";
 
     return $out;
-
 }
 
