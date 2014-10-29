@@ -1,0 +1,396 @@
+
+=head2 correlate_patch3
+
+=for usage
+
+ $of = correlate_patch3($im0, $im1, $loc0, $of0, $size0, $patchr0, $corr_thresh);
+
+=for ref
+
+Cross-correlate starfield image patches to identify their offsets.
+This is modeled on correlate_patch, but faster.  
+
+You feed in two images, a location in one, a guess offset vector to the
+corresponding location in the other (all in pixel coordinates, of
+course), a size of a region to consider, a patch radius, and a minimum
+correlation coefficient below which the fit is rejected.
+
+The purpose of the guess offset vector is to reduce the size of the
+region to consider for the initial coarse search.  If the size of the
+region to consider is large enough, you can set the guess offset vector 
+to 0.
+
+You get back out a new offset 2-vector, in floating point pixel steps by which
+the patch in the initial image must be translated to arrive at the corresponding
+location in the final image.  The rotation angle is fit but not returned.
+
+The sizes are radii rather than diameters, and the diameter is always rounded to 
+be odd -- so to use a 25x25 pixel region, specify either 12 or 13.
+
+=cut
+use PDL::NiceSlice;
+use strict;
+
+sub correlate_patch4 {
+    my $im0  = shift;   # full image
+    my $im1  = shift;   # full image 
+    my $loc0 = shift;   # 2-PDL: location in im0 (pixels)
+    my $of0  = shift;   # 2-PDL: guess offset in piels to location in im1
+    my $sizer0 = shift;  # radius of offset ranges to consider (in pixels)
+    my $patchr0 = shift;
+    my $corr_thresh = shift || 0.85;
+
+    our($bigsize, $smallsize, $patch0, $patch1, $corr, $maxloc, $region, $x_of, $y_of, $corrmax, $dxy, $workspace, $vec);
+
+    $bigsize = $patchr0 * 2 + $sizer0*2 + 2;
+    $smallsize = $patchr0 * 2 + 1;
+
+
+    ##############################
+    # Extract patches: one big, one normal
+    $patch0 = $im0->range($loc0 - $patchr0 - $sizer0,        [$bigsize  , $bigsize  ], 't')->copy;
+    $patch1 = $im1->range($loc0 - $patchr0 + $of0, [$smallsize, $smallsize], 't')->copy;
+
+
+     return asin(pdl(1.1,1.1)) if(any(!isfinite($patch0)) || any(!isfinite($patch1)));
+
+#    $patch0->where(!isfinite($patch0)) .= 0;
+#    $patch1->where(!isfinite($patch1)) .= 0;
+#    
+#    $patch0->badflag(0);
+#    $patch1->badflag(0);
+
+    ##############################
+    # Do the correlation in a PP routine below (hotspot)
+    $corr = zeroes($sizer0*2 + 1, $sizer0*2 + 1);
+    explicit_correlate4($patch0, $patch1, $corr);
+    
+    ##############################
+    # Figure the major offset (pixel-to-pixel)
+    $maxloc = whichND($corr == ($corrmax = $corr->max));
+
+    if($maxloc->nelem == 0) {
+      return asin(pdl(1.1,1.1));
+    } elsif($maxloc->nelem>2) {
+      print "!"; 
+      $maxloc=$maxloc->(:,(0));
+    }
+
+    $maxloc = $maxloc->(:,(0));
+
+    ##############################
+    # Figure the sub-pixel offset with the convergent interpolator.
+    $patch0 = $im0->range($loc0 - $patchr0 - 3,                            [$smallsize+6,$smallsize+6],'t')->copy;
+    $patch1 = $im1->range($loc0 - $patchr0 - 3 + $of0 - ($maxloc-$sizer0), [$smallsize+6,$smallsize+6],'t')->copy;
+    $workspace = zeroes($patch0->dims,2);
+    $vec = zeroes(4);
+    fractional_correlate4($patch0->(0:-1:1,  0:-1:1),   $patch1->(0:-1:1,  0:-1:1),   $workspace, $vec ); 
+    
+    ##############################
+    # Check correlation total 
+    if($vec->((3)) < $corr_thresh) {
+	return asin(pdl(1.1,1.1));
+    }
+    
+    ##############################
+    # Assemble the output
+    return $of0 - $maxloc - $vec->(0:1) + $sizer0;
+  }
+    
+no PDL::NiceSlice;
+
+use Inline Pdlpp => <<'EOF';
+
+# 'explicit_correlate finds the primary correlation peak to within 1 pixel by explicit
+# correlation.
+pp_def('explicit_correlate4',
+	Pars=>'source(a,b);patch(c,d);[o]out(e,f)',
+	Code => <<'EOC'
+       PDL_Indx ii,jj,kk,ll;
+       $GENERIC() patchmean,patchvar;
+       $GENERIC() sourcemean,sourcevar;
+       $GENERIC() acc;
+
+       patchmean = 0;
+       for(ii=0;ii<$SIZE(d);ii++) {
+	 for(jj=0;jj<$SIZE(c);jj++) {
+	   patchmean += $patch( c=>jj, d=>ii );
+	 }
+       }
+       patchmean /= $SIZE(d) * $SIZE(c);
+
+       patchvar = 0;
+       for(ii=0;ii<$SIZE(d);ii++) {
+	 for(jj=0;jj<$SIZE(c);jj++) {
+	   patchvar += ($patch( c=>jj, d=>ii )-patchmean) * ($patch( c=>jj, d=>ii )-patchmean);
+	 }
+       }
+       patchvar /= $SIZE(d) * $SIZE(c);
+       patchvar = sqrt(patchvar);
+       
+       
+       for(ii=0;ii<$SIZE(f);ii++) {
+	 for(jj=0;jj<$SIZE(e);jj++) {
+	   acc  =0;
+
+	   // Accumulate source mean and variance 
+	   sourcemean = 0;
+	   for(kk=0;kk<$SIZE(d);kk++) {
+	     for(ll=0;ll<$SIZE(c);ll++) {
+	       sourcemean += $source( a=>jj+ll, b=>ii+kk );
+	     }
+	   }
+	   sourcemean /= $SIZE(d) * $SIZE(c);
+
+	   sourcevar = 0;
+	   for(kk=0;kk<$SIZE(d);kk++) {
+	     for(ll=0;ll<$SIZE(c);ll++) {
+	       sourcevar += (  ( $source( a=>jj+ll, b=>ii+kk ) - sourcemean) * 
+			       ( $source( a=>jj+ll, b=>ii+kk ) - sourcemean)
+			       );
+	     }
+	   }
+	   sourcevar /= $SIZE(d) * $SIZE(c);
+	   sourcevar = sqrt(sourcevar);
+
+	   
+	   // Accumulate correlation
+	   for(kk=0;kk<$SIZE(d);kk++) {
+	     for(ll=0;ll<$SIZE(c);ll++) {
+	       acc += (  ($source( a=>jj+ll, b=>ii+kk ) - sourcemean) * 
+			 ($patch ( c=>ll,    d=>kk    ) - patchmean)
+			 );
+	     }
+	   }
+	   $out( e=>jj, f=>ii ) = acc / (sourcevar * patchvar * $SIZE(d) * $SIZE(c));
+	 }
+       }
+EOC
+       );
+
+###
+# fractional_correlate finds subpixel offsets.  It returns
+# (offset-x, offset-y, rotation-in-degrees, correlation).  The patch
+# and source should be the same size, and they should
+# be centered.  It works by simple scan of the parameter space: +/- 0.5 
+# pixel by 0.02 pixels, with rotation steps by 0.1 pixel at the periphery
+# up to +/-2 pixel rotation.
+
+pp_addhdr(<<'EOC');
+double quasihanning(double x) {
+  if(x <= -1 || x >= 1) { return 0; }
+  if(x < -0.5) { return 2*(x+1)*(x+1); }
+  if(x > 0.5)  { return 2*(x-1)*(x-1); }
+  return (1 - 2*x*x);
+}
+EOC
+
+pp_def('quasihanning',
+	Pars=>'source(); [o]out();',
+	Code => <<'EOC'
+	$GENERIC() source = $source();
+	if(source <= -1 || source >= 1) {
+	  $out() = 0;
+	} else if( source < -0.5 ) {
+	  $out() = 2 * (source+1)*(source+1);
+	} else if( source > 0.5 ) {
+	  $out() = 2 * (source-1)*(source-1);
+	} else {
+	  $out() =  (1 - 2*source*source);
+	}
+EOC
+	);
+	
+
+pp_def('qh',Pars=>'in();[o]out()',
+	Code=>'$out() = quasihanning($in());'
+	);
+
+
+pp_def('fractional_correlate4',
+       Pars=>'source(a,b); patch(a,b); [o]work(a,b,c=2); [o]out(n=4)',
+       Code => <<'EOC'
+       PDL_Indx ii,jj,kk,ll;
+       $GENERIC() acen,bcen,asiz1,bsiz1,asiz2,bsiz2,asiz3,bsiz3;
+       $GENERIC() rotstep,rotrange, rot;
+       $GENERIC() cdx, cdy, ddx, ddy, dx, dy, crot, drot, ncrot, ncdx, ncdy;
+       $GENERIC() s, c, acc1, acc2,corr, mult;
+       $GENERIC() xs, ys;
+       PDL_Indx ixs, iys;
+       int flag = 0;
+       
+       rotrange = 2.0 / ( $SIZE(b) /  2.0   ) / 2.0;
+       rotstep = rotrange / 8.0;
+       
+       $out(n=>3)=0;
+       
+       acen = $SIZE(a)/2;
+       bcen = $SIZE(b)/2;
+       asiz1 = $SIZE(a)-1;
+       bsiz1 = $SIZE(b)-1;
+       asiz2 = $SIZE(a)-2;
+       bsiz2 = $SIZE(b)-2;
+       asiz3 = $SIZE(a)-3;
+       bsiz3 = $SIZE(b)-3;
+
+       cdx = 0;
+       cdy = 0;
+       crot= 0;
+
+//printf( "\n\n");
+       for(mult=0.25; mult>=0.003; mult *= 0.75) {
+//printf("/");
+ start_loop_$GENERIC(): 
+//printf("-");fflush(stdout);
+// printf( "%g,%g,%g 1/%g:  corr=%.8g\n",cdx,cdy,crot,1/mult, $out(n=>3));
+
+       if( fabs(cdx) < 2.5/2 && fabs(cdy) < 2.5/2 && fabs(crot) < 0.1/2 ) {
+         flag = 0;
+
+	 for( ddx = -mult;       ddx <=  mult ;          ddx += mult ) {
+	   for( ddy= -mult;        ddy <= mult ;          ddy += mult ) {
+	     for( drot = -rotstep * mult;  drot <= rotstep * mult;    drot+= rotstep * mult ) {
+	       dx = cdx + ddx;
+	       dy = cdy + ddy;
+	       rot = crot + drot;
+	       
+	       s = sin( rot );
+	       c = cos( rot );
+	       acc1=acc2=0;
+
+	       for( ii=3; ii<bsiz3; ii++ ) {
+		 for( jj=3; jj<asiz3; jj++ ) {
+		   
+		   // resample patch into work(:,:,(0)) (quasihanning interpolation)
+
+		   // ixs,iys gets floor(xs,ys);   xs and ys end up on the interval [0,1).
+		   xs = (jj - acen) * c - (ii - bcen) * s  + acen    -   dx;
+		   ys = (jj - acen) * s + (ii - bcen) * c  + bcen    -   dy;
+		   ixs = (PDL_Indx)xs;
+		   iys = (PDL_Indx)ys;
+		   if(xs < 0) ixs -= 1;
+		   if(ys < 0) iys -= 1;
+		   xs -= ixs;
+		   ys -= iys;
+
+		   acc1 += (
+		   	$work(a=>jj, b=>ii, c=>0) = ( (ixs < 1 || iys < 1 || ixs >= asiz2 || iys >= bsiz2) ? 0 :
+				     	    (
+					      quasihanning((xs+1)/2) * (
+					      			     quasihanning((ys+1)/2) * $patch( a=>ixs-1, b=>iys-1 ) +
+								     quasihanning((ys  )/2) * $patch( a=>ixs-1, b=>iys   ) +
+								     quasihanning((ys-1)/2) * $patch( a=>ixs-1, b=>iys+1 ) +
+								     quasihanning((ys-2)/2) * $patch( a=>ixs-1, b=>iys+2 )
+								     ) +
+					      quasihanning((xs  )/2) * (
+					      			     quasihanning((ys+1)/2) * $patch( a=>ixs  , b=>iys-1 ) +
+								     quasihanning((ys  )/2) * $patch( a=>ixs  , b=>iys   ) +
+								     quasihanning((ys-1)/2) * $patch( a=>ixs  , b=>iys+1 ) +
+								     quasihanning((ys-2)/2) * $patch( a=>ixs  , b=>iys+2 )
+								     ) +
+					      quasihanning((xs-1)/2) * (
+					      			     quasihanning((ys+1)/2) * $patch( a=>ixs+1, b=>iys-1 ) +
+								     quasihanning((ys  )/2) * $patch( a=>ixs+1, b=>iys   ) +
+								     quasihanning((ys-1)/2) * $patch( a=>ixs+1, b=>iys+1 ) +
+								     quasihanning((ys-2)/2) * $patch( a=>ixs+1, b=>iys+2 )
+								     ) +
+					      quasihanning((xs-2)/2) * (
+					      			     quasihanning((ys+1)/2) * $patch( a=>ixs+2, b=>iys-1 ) +
+								     quasihanning((ys  )/2) * $patch( a=>ixs+2, b=>iys   ) +
+								     quasihanning((ys-1)/2) * $patch( a=>ixs+2, b=>iys+1 ) +
+								     quasihanning((ys-2)/2) * $patch( a=>ixs+2, b=>iys+2 )
+								     )
+					    )/4)
+					    );
+
+		   
+		   // resample source into work(:,:,(1)) (linear interpolation)
+		   xs =   (jj - acen) * c + (ii - bcen) * s  + acen   +   dx;
+		   ys = - (jj - acen) * s + (ii - bcen) * c  + bcen   +   dy;
+		   ixs = (PDL_Indx)xs;
+		   iys = (PDL_Indx)ys;
+		   if(xs < 0) ixs -= 1;
+		   if(ys < 0) iys -= 1;
+		   xs -= ixs;
+		   ys -= iys;
+
+		   acc2 += (
+		   	$work(a=>jj, b=>ii, c=>1) = ( (ixs < 1 || iys < 1 || ixs >= asiz2 || iys >= bsiz2) ? 0 :
+				     	    (
+					      quasihanning((xs+1)/2) * (
+					      			     quasihanning((ys+1)/2) * $source( a=>ixs-1, b=>iys-1 ) +
+								     quasihanning((ys  )/2) * $source( a=>ixs-1, b=>iys   ) +
+								     quasihanning((ys-1)/2) * $source( a=>ixs-1, b=>iys+1 ) +
+								     quasihanning((ys-2)/2) * $source( a=>ixs-1, b=>iys+2 )
+								     ) +
+					      quasihanning((xs  )/2) * (
+					      			     quasihanning((ys+1)/2) * $source( a=>ixs  , b=>iys-1 ) +
+								     quasihanning((ys  )/2) * $source( a=>ixs  , b=>iys   ) +
+								     quasihanning((ys-1)/2) * $source( a=>ixs  , b=>iys+1 ) +
+								     quasihanning((ys-2)/2) * $source( a=>ixs  , b=>iys+2 )
+								     ) +
+					      quasihanning((xs-1)/2) * (
+					      			     quasihanning((ys+1)/2) * $source( a=>ixs+1, b=>iys-1 ) +
+								     quasihanning((ys  )/2) * $source( a=>ixs+1, b=>iys   ) +
+								     quasihanning((ys-1)/2) * $source( a=>ixs+1, b=>iys+1 ) +
+								     quasihanning((ys-2)/2) * $source( a=>ixs+1, b=>iys+2 )
+								     ) +
+					      quasihanning((xs-2)/2) * (
+					      			     quasihanning((ys+1)/2) * $source( a=>ixs+2, b=>iys-1 ) +
+								     quasihanning((ys  )/2) * $source( a=>ixs+2, b=>iys   ) +
+								     quasihanning((ys-1)/2) * $source( a=>ixs+2, b=>iys+1 ) +
+								     quasihanning((ys-2)/2) * $source( a=>ixs+2, b=>iys+2 )
+								     )
+					    )/4)
+					    );
+		 }
+	       }
+	       
+	       // re-use xs as a workspace since it is no longer needed. 
+	       // acc1 gets mean(resampled-patch), 
+	       // acc2 gets mean(resampled-source).
+	       xs = (bsiz3-3)*(asiz3-3);
+	       acc1 /= xs;
+	       acc2 /= xs;
+	       
+	       
+	       // Now figure the correlation coefficient. Reuse s and c since they're no longer needed...
+	       s = c = corr=0;
+	       for( ii=3; ii<bsiz3; ii++ ) {
+		 for( jj=3; jj<bsiz3; jj++ ) {
+		   xs = $work(a=>jj, b=>ii, c=>0) - acc1;
+		   s += xs*xs;
+		   ys = $work(a=>jj, b=>ii, c=>1) - acc2;
+		   c += ys*ys;
+		   corr += xs*ys;
+		 }
+	       }
+	       corr /= (sqrt(s*c)) ;
+	       if(corr > $out(n=>3)) {
+		 $out(n=>0) = dx * 2;
+		 $out(n=>1) = dy * 2;
+		 $out(n=>2) = rot * 2;
+		 $out(n=>3) = corr;
+//		 		 printf("dx=%g, dy=%g, rot=%g, corr=%g, c=%g, s=%g\n",dx*2,dy*2,rot*2,corr,cos(rot),sin(rot));
+		 cdx = dx;
+		 cdy = dy; 
+		 crot = rot;
+ 	     	 goto start_loop_$GENERIC();	
+		 }
+	     }
+	   }
+	 }
+       } else {
+	 $out(n=>0) = $out(n=>1) = $out(n=>2) = $out(n=>3) = 0;
+       }
+       }
+//       printf("FINAL: dx=%g, dy=%g, rot=%g, corr=%g\n",dx*2,dy*2,rot*2,corr);
+EOC
+       );
+
+EOF
+;
+
+*fractional_correlate4 = \&PDL::fractional_correlate4;
+*explicit_correlate4 = \&PDL::explicit_correlate4;
+

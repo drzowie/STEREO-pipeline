@@ -114,11 +114,6 @@ sub get_distortion_params2 {
     
     use PDL::Transform;
     
-#	print "matching...\n";
-#	$im1 = $im1->match($im0,{method=>'g'});
-#	$im0 = $im0->match($im0,{method=>'g'});
-#	print "ok\n";
-    
     my $guess_offset = ($t1 - $t0)/3600/24   * $opt->{DIST_GUESS_DRIFTRATE};
     my $deltat = ($t1-$t0)/3600/24;
     
@@ -126,16 +121,22 @@ sub get_distortion_params2 {
     
     my @of = ();
     my @loc = ();
+    my $step0 = pdl($hash->{'BKSUB_CUBE'}->dim(0)/($opt->{'DIST_CORR_NSAMP'}+1))->floor;
+    my $step1 = pdl($hash->{'BKSUB_CUBE'}->dim(1)/($opt->{'DIST_CORR_NSAMP'}+1))->floor;
+    my $start0 = pdl(($hash->{'BKSUB_CUBE'}->dim(0) - $opt->{'DIST_CORR_NSAMP'} * $step0)/2)->floor;
+    my $start1 = pdl(($hash->{'BKSUB_CUBE'}->dim(1) - $opt->{'DIST_CORR_NSAMP'} * $step1)/2)->floor;
+    
     for( $j=0; $j < $opt->{'DIST_CORR_NSAMP'}; $j++ ) {
 	for($i=0; $i < $opt->{'DIST_CORR_NSAMP'}; $i++) {
-	    my $loc = pdl( ($i+0.5) * ($hash->{'BKSUB_CUBE'}->dim(0)/($opt->{'DIST_CORR_NSAMP'}+1)),
-			   ($j+0.5) * ($hash->{'BKSUB_CUBE'}->dim(1)/($opt->{'DIST_CORR_NSAMP'}+1))
+	    my $loc = pdl( $start0 + $i * $step0,
+			   $start1 + $j * $step1
 		);
-	    my $a = correlate_patch2($im0, $im1,$loc,
+	    my $a = correlate_patch4($im0, $im1, $loc,
 				     pdl( $guess_offset, 0 ),
 				     $opt->{'DIST_CORR_RSIZE'}/2,
 				     $opt->{'DIST_CORR_PSIZE'}/2,
 				     $opt->{'DIST_MIN_PCORR'});
+
 	    if(defined $a){
 		push(@of,$a);
 		push(@loc, $loc);
@@ -152,14 +153,11 @@ sub get_distortion_params2 {
 	print "\n";
     }
     
-    print "------\n";
-    
     my $of0 = pdl(@of);
     my $looplocs = pdl(@loc);
     
     my $mask = isfinite($of0->((0))) & isfinite($of0->((1)));
     print "mask is $mask\n";
-    our $of00 = $of0->copy;
     my $loc = $looplocs->(:, which($mask));
     my $of = $of0->(:, which($mask));
     my $h = { of     => $of, 
@@ -224,13 +222,13 @@ sub get_distortion_params2 {
     # Define a fit heuristic -- RMS error in location
     my $heur_ret;
     
-    our $heur = sub {
+    my $heur = sub {
 	my $dx = shift;
 	my ($delta1, $delta2, $deltamu, $roll_angle, $r2, $orbital_rotation, $q, $qq) = $dx->list;
 	$deltamu /= 10;
 	$delta1 /= 100;
 	$delta2 /= 100;
-	our $tnl_params = [$master_hdr,$deltamu, $roll_angle, $r2, $delta1, $delta2, $q, $qq];
+	my $tnl_params = [$master_hdr,$deltamu, $roll_angle, $r2, $delta1, $delta2, $q, $qq];
 	
 	my $tnl = t_nl(@$tnl_params);
 	my $to =  t_linear(pre=>[$orbital_rotation,0]);
@@ -246,16 +244,17 @@ sub get_distortion_params2 {
 	$avg = 1e6 if(any(isbad($dists)));
 	
 	if($opt->{DISPLAY}) {
-	    our $ww0;
+	    our $ww0,$ww1;
 	    unless(defined $ww0) {
-		$ww0=pgwin(xs,size=>[6,3],nx=>2);
+		$ww0=gpwin(x11,size=>[4,3]);
+		$ww1=gpwin(x11,size=>[4,3]);
 	    }
 	    $diffs = $ct2a-$ct1a;
 	    $z = zeroes(256,256,2);
 	    $zr = $z->range(($ct2a+$ct1a)/8-5,[11,11],'e');
 	    $zr->mv(-1,0) .= $ct2a-$ct1a;
-	    $ww0->panel(1); $ww0->imag($z->(:,:,(0)),-2,2); $ww0->hold;
-	    $ww0->panel(2); $ww0->imag($z->(:,:,(1)),-2,2); $ww0->hold;
+	    $ww0->imag($z->(:,:,(0)),{cbr=>[-1.25,1.25],j=>1,title=>"X"}); 
+	    $ww1->imag($z->(:,:,(1)),{cbr=>[-1.25,1.25],j=>1,title=>"Y"}); 
 	}
 	$heur_ret = $avg;
 	return $avg;
