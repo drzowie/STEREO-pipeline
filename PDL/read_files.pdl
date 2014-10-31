@@ -111,7 +111,7 @@ $PDL::BIGPDL = 1;
 use PDL::NiceSlice;
 
 use strict;
-
+use PDL::Transform;
 
 sub read_files {
     my $VERSION = "2.3 22-May-2013";
@@ -120,6 +120,7 @@ sub read_files {
     my $opt = shift // {};
     my $defaults = {
 	neg=>'bad',
+	REGULARIZE_POINTING=>1,
 	MASK_THRESH => 500,
 	MASK_RADIUS => 0,
 	MASK_HI2_STRIP => 0,
@@ -487,6 +488,40 @@ sub read_files {
 	 }
 	 
 	 print "\n";
+     }
+
+     if($opt->{REGULARIZE_POINTING}) {
+	 print "regularizing pointing...\n";
+
+	 $out->{ORIG_HDRS} = $out->{RAW_HDRS};
+	 $out->{RAW_HDRS} = [ map { 
+	     my $h = new Astro::FITS::Header( 
+		 Cards=> [   (tied %{$out->{ORIG_HDRS}->[$_]})   ->   cards     ] 
+		 );
+	     my %hh;
+	     tie( %hh, "Astro::FITS::Header", $h);
+	     \%hh;
+			      } (0..$#{$out->{ORIG_HDRS}})
+	     ];
+	 $out->{ORIG_CUBE} = $out->{RAW_CUBE}->copy;
+
+	 my $nhdrs = 0 + @{$out->{ORIG_HDRS}};
+
+	 for my $i(0..$nhdrs-1){
+	     my $a = $out->{ORIG_CUBE}->(:,:,($i));
+
+	     $a->sethdr($out->{ORIG_HDRS}->[$i]);
+
+	     print "$i/$nhdrs  ";
+	     my $b = $a->match($out->{ORIG_HDRS}->[$nhdrs/2],{method=>'j'});
+	       # Preserve date-obs and exptime so get_distortion_params knows what to do later.
+	     $b->hdr->{'DATE-OBS'} = $a->hdr->{'DATE-OBS'};
+	     $b->hdr->{'EXPTIME'} = $a->hdr->{'EXPTIME'};
+
+	     $out->{RAW_CUBE}->(:,:,($i)) .= $b;
+	     $out->{RAW_HDRS}->[$i] = $b->gethdr;
+	 }
+	 print "okay\n";
      }
 
 
