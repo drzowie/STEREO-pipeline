@@ -1,0 +1,649 @@
+
+=head2 correlate_patch5 
+
+=for usage
+
+ $of = correlate_patch5($im0, $im1, $loc0, $of0, $size0, $patchr0, $corr_thresh);
+
+=for ref
+
+Cross-correlate starfield image patches to identify their offsets.
+This is intended to be even faster than correlate_patch4, by tweaking some
+of the convergence parameters.
+
+You feed in two images, a location in one, a guess offset vector to the
+corresponding location in the other (all in pixel coordinates, of
+course), a size of a region to consider, a patch radius, and a minimum
+correlation coefficient below which the fit is rejected.
+
+The purpose of the guess offset vector is to reduce the size of the
+region to consider for the initial coarse search.  If the size of the
+region to consider is large enough, you can set the guess offset vector 
+to 0.
+
+You get back out a new offset 2-vector, in floating point pixel steps by which
+the patch in the initial image must be translated to arrive at the corresponding
+location in the final image.  The rotation angle is fit but not returned.
+
+The sizes are radii rather than diameters, and the diameter is always rounded to 
+be odd -- so to use a 25x25 pixel region, specify either 12 or 13.
+
+=cut
+use PDL::NiceSlice;
+use strict;
+
+sub correlate_patch5 {
+    my $im0  = shift;   # full image
+    my $im1  = shift;   # full image 
+    my $loc0 = shift;   # 2-PDL: location in im0 (pixels)
+    my $of0  = shift;   # 2-PDL: guess offset in piels to location in im1
+    my $sizer0 = shift;  # radius of offset ranges to consider (in pixels)
+    my $patchr0 = shift;
+    my $corr_thresh = shift || 0.85;
+
+    our($bigsize, $smallsize, $patch0, $patch1, $corr, $maxloc, $region, $x_of, $y_of, $corrmax, $dxy, $workspace, $vec);
+
+    $bigsize = $patchr0 * 2 + $sizer0*2 + 2;
+    $smallsize = $patchr0 * 2 + 1;
+
+
+    ##############################
+    # Extract patches: one big, one normal
+    $patch0 = $im0->range($loc0 - $patchr0 - $sizer0,        [$bigsize  , $bigsize  ], 't')->copy;
+    $patch1 = $im1->range($loc0 - $patchr0 + $of0, [$smallsize, $smallsize], 't')->copy;
+
+
+     return asin(pdl(1.1,1.1)) if(any(!isfinite($patch0)) || any(!isfinite($patch1)));
+
+    ##############################
+    # Do the correlation in a PP routine below (hotspot)
+    $corr = zeroes($sizer0*2 + 1, $sizer0*2 + 1);
+    print "explicit_correlate5...\n";
+    explicit_correlate5($patch0, $patch1, $corr);
+    
+    ##############################
+    # Figure the major offset (pixel-to-pixel)
+#    print "maxloc...\n";
+    $maxloc = whichND($corr == ($corrmax = $corr->max));
+
+    if($maxloc->nelem == 0) {
+      return asin(pdl(1.1,1.1));
+    } elsif($maxloc->nelem>2) {
+      $maxloc=$maxloc->(:,(0));
+    }
+
+    $maxloc = $maxloc->(:,(0));
+
+#    print "subpixel stuff...\n";
+    ##############################
+    # Figure the sub-pixel offset with the convergent interpolator.
+    $patch0 = $im0->range($loc0 - $patchr0 - 3,                            [$smallsize+6,$smallsize+6],'t')->copy;
+    $patch1 = $im1->range($loc0 - $patchr0 - 3 + $of0 - ($maxloc-$sizer0), [$smallsize+6,$smallsize+6],'t')->copy;
+    $workspace = zeroes($patch0->dims,4);
+    $vec = zeroes(4);
+#    print "fractional_correlate5\n";
+    fractional_correlate5($patch0->(0:-1:1,  0:-1:1),   $patch1->(0:-1:1,  0:-1:1),   $workspace, $vec ); 
+    
+    ##############################
+    # Check correlation total 
+    if($vec->((3)) < $corr_thresh) {
+	return asin(pdl(1.1,1.1));
+    }
+    
+    ##############################
+    # Assemble the output
+    return $of0 - $maxloc - $vec->(0:1) + $sizer0;
+  }
+    
+no PDL::NiceSlice;
+
+use Inline Pdlpp => <<'EOF';
+
+# 'explicit_correlate finds the primary correlation peak to within 2 pixels by explicit
+# correlation.
+pp_def('explicit_correlate5',
+	Pars=>'source(a,b);patch(c,d);[o]out(e,f)',
+	Code => <<'EOC'
+       PDL_Indx ii,jj,kk,ll;
+       $GENERIC() patchmean,patchvar;
+       $GENERIC() sourcemean,sourcevar;
+       $GENERIC() acc;
+
+       patchmean = 0;
+       for(ii=0;ii<$SIZE(d);ii++) {
+	 for(jj=0;jj<$SIZE(c);jj++) {
+	   patchmean += $patch( c=>jj, d=>ii );
+	 }
+       }
+       patchmean /= $SIZE(d) * $SIZE(c);
+
+       patchvar = 0;
+       for(ii=0;ii<$SIZE(d);ii++) {
+	 for(jj=0;jj<$SIZE(c);jj++) {
+	   patchvar += ($patch( c=>jj, d=>ii )-patchmean) * ($patch( c=>jj, d=>ii )-patchmean);
+	 }
+       }
+       patchvar /= $SIZE(d) * $SIZE(c);
+       patchvar = sqrt(patchvar);
+       
+       
+       for(ii=0;ii<$SIZE(f);ii+=2) {
+	 for(jj=0;jj<$SIZE(e);jj+=2) {
+	   acc  =0;
+
+	   // Accumulate source mean and variance 
+	   sourcemean = 0;
+	   for(kk=0;kk<$SIZE(d);kk++) {
+	     for(ll=0;ll<$SIZE(c);ll++) {
+	       sourcemean += $source( a=>jj+ll, b=>ii+kk );
+	     }
+	   }
+	   sourcemean /= $SIZE(d) * $SIZE(c);
+
+	   sourcevar = 0;
+	   for(kk=0;kk<$SIZE(d);kk++) {
+	     for(ll=0;ll<$SIZE(c);ll++) {
+	       sourcevar += (  ( $source( a=>jj+ll, b=>ii+kk ) - sourcemean) * 
+			       ( $source( a=>jj+ll, b=>ii+kk ) - sourcemean)
+			       );
+	     }
+	   }
+	   sourcevar /= $SIZE(d) * $SIZE(c);
+	   sourcevar = sqrt(sourcevar);
+
+	   
+	   // Accumulate correlation
+	   for(kk=0;kk<$SIZE(d);kk++) {
+	     for(ll=0;ll<$SIZE(c);ll++) {
+	       acc += (  ($source( a=>jj+ll, b=>ii+kk ) - sourcemean) * 
+			 ($patch ( c=>ll,    d=>kk    ) - patchmean)
+			 );
+	     }
+	   }
+	   $out( e=>jj, f=>ii ) = acc / (sourcevar * patchvar * $SIZE(d) * $SIZE(c));
+	 }
+       }
+EOC
+       );
+
+###
+# fractional_correlate finds subpixel offsets.  It returns
+# (offset-x, offset-y, rotation-in-degrees, correlation).  The patch
+# and source should be the same size, and they should
+# be centered.  It works by simple scan of the parameter space: +/- 0.5 
+# pixel by 0.02 pixels, with rotation steps by 0.1 pixel at the periphery
+# up to +/-2 pixel rotation.
+
+pp_addhdr(<<'EOC');
+double quasihanning(double x) {
+  x *= 0.5;
+  if(x <= -1 || x >= 1) { return 0; }
+  if(x < -0.5) { return 2*(x+1)*(x+1); }
+  if(x > 0.5)  { return 2*(x-1)*(x-1); }
+  return (1 - 2*x*x);
+}
+
+
+/* basic amoeba fitter */
+#define NMAX 100
+#define NDIM 3
+#define HEURTOL 1e-5
+#define MAXSIZ 4
+#define MINSIZ 1e-5
+
+double cp_heur5(double testvec[NDIM]);
+
+/* Update vec itself with the return value. */
+/* Return the heuristic value of the final centroid. */
+
+double cp_amoeba( double vec[NDIM] ) {
+     double vecs[NDIM*(NDIM+1)];
+     double centroid[NDIM];
+     double testvec[NDIM];
+     double testvec2[NDIM];
+     double heurs[NDIM+1];
+     double *v0,*v1;
+     int step;
+     int i,j,idim;
+     int imax,imax2,imin;
+     double maxdiff;
+     double testheur,testheur2;
+
+     /* Make NDIM+1 copies of the input vector */
+     v1 = vecs;
+     v0 = vec;
+     for(i=j=0; i<NDIM*(NDIM+1); ) {
+       vecs[i++] = vec[j++];
+       if(j==NDIM) j=0;
+     }
+
+     /* Turn into a simplex by incrementing one dimension of each copy */
+     for(i=NDIM; i<NDIM*(NDIM+1); i+= (NDIM+1))
+       vecs[i]+=1;
+
+     /* Initialize the heuristic values */
+     for(i=0;i<NDIM+1;i++)
+       heurs[i]=cp_heur5(vecs+i*NDIM);
+
+     /****** Loop till convergence (condition inside loop) */
+     for(step=0;;) {
+
+         /* Figure centroid */
+	 for( j=0; j<NDIM; j++)     centroid[j]=0;
+	 for( i=0; i<NDIM+1; i++ )
+	   for( j=0; j<NDIM; j++ )  centroid[j] += vecs[j + i*NDIM];
+	 for(j=0; j<NDIM; j++) 	    centroid[j] /= NDIM+1;
+	 
+         /* Check iteration count */
+	if(step > 500) {
+		printf("too many steps\n");
+		goto failure;
+	}
+
+	        
+        /* check largest coordinate difference in the current amoeba */
+	maxdiff = 0;
+	for(idim=0;idim<NDIM;idim++)
+	  for(i=0;i<NDIM;i++)
+	    for(j=i+1;j<NDIM+1;j++) {
+	      double z = fabs(vecs[idim + NDIM * i] - vecs[idim + NDIM * j]);
+	      if(maxdiff < z)
+	        maxdiff=z;
+	    }
+        if(maxdiff > MAXSIZ) {
+           printf("too big\n");
+	   goto failure;
+	}
+	if(maxdiff < MINSIZ)
+	   goto success;
+
+
+	/* check for heuristic-equality success */
+	for(imax=imin=-1, i=0; i<NDIM+1; i++) {
+	  if(imax<0 || heurs[i] > heurs[imax])
+	     imax=i;
+	  if(imin<0 || heurs[i] < heurs[imin])
+	     imin=i;
+	}
+	if(heurs[imax] - heurs[imin] < HEURTOL)
+	  goto success;
+
+        /**** No success nor failure.  Try stuff. ****/
+	step++;
+
+	/* Reflect the max point through the centroid. */
+	for(i=0;i<NDIM;i++) 
+	   testvec[i] = centroid[i] - 2 * vecs[ imax*NDIM + i ];
+	testheur = cp_heur5(testvec);
+
+	/* Test for egregious badness */
+	if(testheur > heurs[imax]) {
+	    /* it's bad -- try shrinking around the best point instead. */
+	    for(i=0;i<NDIM+1;i++) {
+	        if(i != imin) {
+		   for(j=0;j<NDIM;j++)
+		     vecs[i*NDIM + j] = 0.5 * (vecs[i*NDIM+j] + vecs[imin*NDIM+j]);
+		   heurs[i] = cp_heur5(vecs+i*NDIM);
+                }
+	    }
+	} else {
+	    /* it's not bad. Check stretch/shrink conditions. */
+	    if(testheur < heurs[imin]) {
+	      /* it's grrrreat!  Try stretching that way */
+	      for(i=0;i<NDIM;i++)
+	        testvec2[i] = centroid[i] - 4 * vecs[ imax*NDIM + i ];
+	      testheur2 = cp_heur5(testvec2);
+
+	      if(testheur2 < testheur) {
+	        /* The stretch was successful.  Keep the stretched vector. */
+		for(i=0;i<NDIM;i++)
+		  vecs[ imax*NDIM + i] = testvec2 [i];
+		heurs[imax] = testheur2;
+	      } else {
+                /* The stretch was not successful.  Keep the not-stretched vector. */
+		for(i=0;i<NDIM;i++)
+		  vecs[ imax*NDIM + i] = testvec[i];
+		heurs[imax] = testheur;
+	      }
+	   } else {
+	      /* stretch was not grrrreat.  Check if it's good or just mediocre. */
+	      imax2=-1;
+	      for(i=0;i<NDIM+1;i++) {
+	        if((i != imax) && ( imax2 < 0 || heurs[i] > heurs[imax2] ) )
+		  imax2 = i;
+	      }
+	      if( testheur > heurs[imax2] ) {
+	         /* it's just mediocre. Try squishing a bit. */
+		 for(i=0;i<NDIM;i++)
+		   testvec2[i] = centroid[i] - 1.5 * vecs[imax * NDIM + i];
+		 testheur2 = cp_heur5(testvec2);
+
+    		 if( testheur2 < testheur ) {
+		   /* squishing helped.  Use that. */
+		   for(i=0;i<NDIM;i++)
+		     vecs[ imax*NDIM + i] = testvec2[i];
+		   heurs[imax] = testheur2;
+		 } else {
+		   /* squishing didn't help, so just keep the not-stretched vector. */
+		   for( i=0; i<NDIM; i++ )
+		     vecs[ imax*NDIM + i] = testvec[i];
+		   heurs[imax] = testheur;
+		 }
+	      } else {
+	        /* reflecting was a good choice even though it's not grrrreat.  Keep the vector. */
+		for(i=0; i<NDIM; i++)
+		  vecs[ imax*NDIM + i] = testvec[i];
+		heurs[imax] = testheur;
+	      }
+	   } /* end of grrrreat stretch test */
+	}
+     } /* end of loop */
+
+     success:
+       for(i=0;i<NDIM;i++) {
+          vec[i] = centroid[i];
+       }
+       return -cp_heur5(vec);
+
+     failure:
+       for(i=0; i<NDIM; i++) {
+          vec[i] = asin(1.1);
+       }
+       return 0;
+}
+
+
+
+
+// These are initialized in fractional_correlate5, before it calls cp_amoeba 
+static PDL_Indx patch_width, patch_height;
+static double *patch;
+static double *source;
+static double *work_patch;
+static double *work_source;
+
+double cp_heur5(double testvec[NDIM]) {
+       /* resample the patch and source to a middle ground */
+       double wcen = patch_width/2;
+       double hcen = patch_height/2;
+
+       double wsiz1 = patch_width-1;
+       double wsiz2 = patch_width-2;
+       double wsiz3 = patch_width-3;
+       double hsiz1 = patch_height-1;
+       double hsiz2 = patch_height-2;
+       double hsiz3 = patch_height-3;
+
+       double dx  = testvec[0]/2;
+       double dy  = testvec[1]/2;
+       double rot = testvec[2]/2;
+
+       // use units of 10 degrees for the sine and cosine parameter.  We rotate by
+       // half of that since we resample one image in one direction and the other in the
+       // other direction.
+       double s = sin( rot * 10 * 3.1415926535898 / 180 );
+       double c = cos( rot * 10 * 3.1415926535898 / 180 );
+       double corr; 
+       
+
+       double acc1 = 0;
+       double wgt1 = 0;
+       double acc2 = 0;
+       double wgt2 = 0;
+
+       PDL_Indx ii,jj,kk;
+
+//       printf("  dx=%g  ",dx);
+       
+       for( ii=3; ii<hsiz3; ii++ ) {
+         for( jj=3; jj<wsiz3; jj++ ) {
+           double xs, ys;
+           PDL_Indx ixs, iys;
+           double qh_1, qh_0, qh1_, qh2_;
+	   PDL_Indx yof_1, yof_0, yof1_, yof2_;
+	   double corr;
+
+         // Symmetric resampling helps eliminate errors due to interpolation/smearing: resample both images to a common middle.
+
+	 // resample patch into work_patch (quasihanning interpolation)
+
+	 // ixs, iys gets floor(xs, ys); xs and ys end up on the interval 0,1 (closed at 0, open at 1).
+	   xs = (jj - wcen) * c   -  (ii - hcen) * s  +  wcen  -  dx;
+	   ys = (jj - wcen) * s   +  (ii - hcen) * c  +  hcen  -  dy;
+	   ixs = (PDL_Indx)xs;
+	   iys = (PDL_Indx)ys;
+	   if(xs<0) ixs -= 1;
+	   if(ys<0) iys -= 1;
+	   xs -= ixs;
+	   ys -= iys;
+	   
+	   qh_1 = quasihanning( ys+1 );
+	   qh_0 = quasihanning( ys   );
+	   qh1_ = quasihanning( ys-1 );
+	   qh2_ = quasihanning( ys-2 );
+
+	   yof_1 = (iys-1) * patch_width;
+	   yof_0 = yof_1 + patch_width;
+	   yof1_ = yof_0 + patch_width;
+	   yof2_ = yof1_ + patch_width;
+
+	   acc1 += (
+	   	work_patch[ jj + ii * patch_width ] =
+		  ( (ixs < 1 || iys < 1 || ixs >= wsiz2 || iys >= hsiz2 ) ? 0 :
+		    ( quasihanning( xs+1 ) * (
+		      		    qh_1 * patch[ ixs-1  +  yof_1 ] +
+				    qh_0 * patch[ ixs-1  +  yof_0 ] +
+				    qh1_ * patch[ ixs-1  +  yof1_ ] +
+				    qh2_ * patch[ ixs-1  +  yof2_ ]
+				    		  ) +
+		      quasihanning( xs   ) * (
+		      		    qh_1 * patch[ ixs    +  yof_1 ] +
+				    qh_0 * patch[ ixs    +  yof_0 ] +
+				    qh1_ * patch[ ixs    +  yof1_ ] +
+				    qh2_ * patch[ ixs    +  yof2_ ]
+				                  ) +
+                      quasihanning( xs-1 ) * (
+		      		    qh_1 * patch[ ixs+1  +  yof_1 ] +
+				    qh_0 * patch[ ixs+1  +  yof_0 ] +
+				    qh1_ * patch[ ixs+1  +  yof1_ ] +
+				    qh2_ * patch[ ixs+1  +  yof2_ ]
+				                  ) +
+                      quasihanning( xs-2 ) * (
+		      		    qh_1 * patch[ ixs+2  +  yof_1 ] +
+				    qh_0 * patch[ ixs+2  +  yof_0 ] +
+				    qh1_ * patch[ ixs+2  +  yof1_ ] +
+				    qh2_ * patch[ ixs+2  +  yof2_ ]
+				                  )
+		  )/4
+		)
+	 );
+
+	 // resample source into work_source (quasihanning interpolation)
+	   xs =   (jj - wcen) * c   +  (ii - hcen) * s  +  wcen  +  dx;
+	   ys = - (jj - wcen) * s   +  (ii - hcen) * c  +  hcen  +  dy;
+	   ixs = (PDL_Indx)xs;
+	   iys = (PDL_Indx)ys;
+	   if(xs<0) ixs -= 1;
+	   if(ys<0) iys -= 1;
+	   xs -= ixs;
+	   ys -= iys;
+
+	    
+	   qh_1 = quasihanning( ys+1 );
+	   qh_0 = quasihanning( ys   );
+	   qh1_ = quasihanning( ys-1 );
+	   qh2_ = quasihanning( ys-2 );
+
+	   yof_1 = (iys-1) * patch_width;
+	   yof_0 = yof_1 + patch_width;
+	   yof1_ = yof_0 + patch_width;
+	   yof2_ = yof1_ + patch_width;
+	  
+	   acc2 += (
+	        work_source[ jj + ii*patch_width ] =
+		  ( (ixs < 1 || iys < 1 || ixs >= wsiz2 || iys >= hsiz2 ) ? 0 :
+		    ( quasihanning( xs+1 ) * (
+		      		    qh_1 * source[ ixs-1  +  yof_1 ] +
+				    qh_0 * source[ ixs-1  +  yof_0 ] +
+				    qh1_ * source[ ixs-1  +  yof1_ ] +
+				    qh2_ * source[ ixs-1  +  yof2_ ]
+				    		  ) +
+		      quasihanning( xs   ) * (
+		      		    qh_1 * source[ ixs    +  yof_1 ] +
+				    qh_0 * source[ ixs    +  yof_0 ] +
+				    qh1_ * source[ ixs    +  yof1_ ] +
+				    qh2_ * source[ ixs    +  yof2_ ]
+				                  ) +
+                      quasihanning( xs-1 ) * (
+		      		    qh_1 * source[ ixs+1  +  yof_1 ] +
+				    qh_0 * source[ ixs+1  +  yof_0 ] +
+				    qh1_ * source[ ixs+1  +  yof1_ ] +
+				    qh2_ * source[ ixs+1  +  yof2_ ]
+				                  ) +
+                      quasihanning( xs-2 ) * (
+		      		    qh_1 * source[ ixs+2  +  yof_1 ] +
+				    qh_0 * source[ ixs+2  +  yof_0 ] +
+				    qh1_ * source[ ixs+2  +  yof1_ ] +
+				    qh2_ * source[ ixs+2  +  yof2_ ]
+				                  )
+		  )/4
+		)
+	   );
+         } // jj loop
+       } // ii loop
+       // acc1 gets mean(resampled-patch).
+       // acc2 gets mean(resampled-source).
+       {
+	double zz = (wsiz3-3)*(hsiz3-3);
+	acc1 /= zz;
+	acc2 /= zz;
+       }
+	 						  
+       // now figure the correlation coefficient. re-use s and c.
+       s = c = corr = 0;
+       for( ii=3; ii < hsiz3; ii++ ) {
+          for(jj=3; jj < wsiz3; jj++ ) {
+	     double a,b;
+	     a = work_patch [ jj + ii * patch_width ] - acc1;
+	     s += a * a;
+	     b = work_source[ jj + ii * patch_width ] - acc2;
+	     c += b * b;
+	     corr += a*b;
+          }
+       }
+       corr /= sqrt(s*c);
+//       printf("\tcp_heur5: vec=(%g,%g,%g), corr=%g\n",testvec[0],testvec[1],testvec[2],corr);
+       return -corr;
+}	 
+EOC
+
+pp_def('cp_heur5',
+	Pars=>'patch(a,b); source(a,b); testvec(d=3); [o]work_patch(a,b,c=4); [o]heur()',
+	GenericTypes=>['D'],
+	Code=><<'EOC'
+	PDL_Indx patch_n = $SIZE(a) * $SIZE(b);
+	double *dpp, *dps;
+	double testvec[3];
+	double corr;
+	extern double *work_patch, *work_source, *patch, *source;
+	extern PDL_Indx patch_width, patch_height;
+	
+	patch = &($work_patch(a=>0,b=>0,c=>0));
+	source = patch + patch_n;
+	work_patch = source + patch_n;
+	work_source = work_patch + patch_n;
+	patch_width = $SIZE(a);
+	patch_height = $SIZE(b);
+	
+	/* copy the patch and source into the workspace */
+	dpp = patch;
+	dps = source;
+	loop(b) %{
+	 loop(a) %{
+	  *(dpp++) = $patch();
+	  *(dps++) = $source();
+	 %}
+	%}
+
+	testvec[0] = $testvec(d=>0);
+	testvec[1] = $testvec(d=>1);
+	testvec[2] = $testvec(d=>2);
+
+	corr = - cp_heur5(testvec);
+	$heur() = corr;
+EOC
+	);
+	
+
+pp_def('quasihanning',
+	Pars=>'source(); [o]out();',
+	GenericTypes=>['D','F'],
+	Code => <<'EOC'
+	$GENERIC() source = $source();
+	if(source <= -1 || source >= 1) {
+	  $out() = 0;
+	} else if( source < -0.5 ) {
+	  $out() = 2 * (source+1)*(source+1);
+	} else if( source > 0.5 ) {
+	  $out() = 2 * (source-1)*(source-1);
+	} else {
+	  $out() =  (1 - 2*source*source);
+	}
+EOC
+	);
+	
+
+pp_def('qh',Pars=>'in();[o]out()',
+	Code=>'$out() = quasihanning($in());'
+	);
+
+
+pp_def('fractional_correlate5',
+       Pars=>'source(a,b); patch(a,b); [o]work(a,b,c=4); [o]out(n=4)',
+       GenericTypes=>['D'],
+       Code => <<'EOC',
+
+       PDL_Indx ii,jj;
+       PDL_Indx patch_n = $SIZE(a) * $SIZE(b);
+       double *dpp, *dps;
+       double vec[4];
+       double corr;
+
+       /* Set globals for cp_heur */
+       patch       = &( $work(a=>0,b=>0,c=>0) );
+       source      = patch      + patch_n;
+       work_patch  = source     + patch_n;
+       work_source = work_patch + patch_n;
+       patch_width=$SIZE(a);
+       patch_height=$SIZE(b);
+ 
+       /* Copy the patch and source into the workspace */
+       dpp = patch;
+       dps = source;
+       loop(b) %{
+        loop(a) %{
+	  *(dpp++) = $patch();
+	  *(dps++) = $source();
+	%}
+       %}
+
+       /* initialize the offset vector */
+       for(ii=0; ii<NDIM; ii++) 
+       		 vec[ii] = 0;
+
+
+       corr = cp_amoeba(vec);	      
+
+       $out(n=>0) = vec[0];
+       $out(n=>1) = vec[1];
+       $out(n=>2) = vec[2];
+       $out(n=>3) = corr;
+EOC
+	);
+	
+EOF
+;
+
+*fractional_correlate5 = \&PDL::fractional_correlate5;
+*explicit_correlate5 = \&PDL::explicit_correlate5;
+

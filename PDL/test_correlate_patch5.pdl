@@ -1,0 +1,55 @@
+###
+# test suite for test_correlate_patch5...
+###
+use strict;
+
+sub test_correlate_patch5 {
+    my $a = double shift;
+    
+    our($acen, $a0, $a1, $step, $x, $y,$a0sub,$a1sub,$lo,$hi);
+    $lo = -1.3;
+    $hi =  1.3;
+    $step = 0.1;
+
+    $acen = $a->shape/2;
+
+    $a0 = $a->range($acen-128,[256,256])->sever;
+
+    my $cp = \&correlate_patch5;
+
+    eval { correlate_patch5(); };
+    
+    $a1 = $a->
+	map(t_linear(pre=>[-0.30,-0.30]),{pix=>1,method=>'h'})->
+	range($acen-128,[256,256])->
+	sever;
+    our($aa1) = $a1;
+    our($aa0) = $a0;
+    my $z = PDL->null;
+    PDL::fractional_correlate5($a0,$a1,zeroes($a0->dims,4),$z);
+    print $z;
+
+
+
+    ##### Full scan
+    our $offs = zeroes(2,($hi-$lo)/$step+1,($hi-$lo)/$step+1);
+    print "offs shape is ".$offs->shape."\n";
+    my ($xx, $yy);
+    $yy=0;
+    for( $y = $lo; $y <= $hi; $y+=$step) {
+	$xx=0;
+	for( $x=$lo; $x <= $hi; $x+=$step) {
+	    print "xy=($x,$y); xxyy=($xx,$yy)...";
+	    $a1 = $a0->map( t_linear(pre=>pdl($x,$y)),{pix=>1,method=>'h'});
+	    $a0sub = $a0->range([64,64],[128,128]);
+	    $a1sub = $a1->range([64,64],[128,128]);
+	    my $z;
+	    $offs->(:,$xx++,$yy) .= ($z=&$cp($a0sub,$a1sub,pdl(64,64),pdl(0,0),5,5+100,0.5));
+	    print $z;
+	}
+	$yy++;
+    }
+
+}
+
+    

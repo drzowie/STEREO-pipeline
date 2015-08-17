@@ -41,7 +41,7 @@ sub get_distortion_params2 {
     $opt->{'DIST_CORR_NSAMP'}  = 30                     unless(exists($opt->{'DIST_CORR_NSAMP'}));
     $opt->{'DIST_CORR_RSIZE'}  = 35                      unless(exists($opt->{'DIST_CORR_RSIZE'}));
     $opt->{'DIST_CORR_PSIZE'}  = 35                      unless(exists($opt->{'DIST_CORR_PSIZE'}));
-    $opt->{'DIST_MIN_PCORR'}   = 0.9                     unless(exists($opt->{'DIST_MIN_PCORR'}));
+    $opt->{'DIST_MIN_PCORR'}   = 0.985                   unless(exists($opt->{'DIST_MIN_PCORR'}));
     $opt->{'DIST_CORRTIME'}    = 6                       unless(exists($opt->{'DIST_CORRTIME'}));
     $opt->{'DIST_GUESS_DRIFTRATE'} = 72/5                unless(exists($opt->{'DIST_GUESS_DRIFTRATE'}));
     $opt->{'DIST_UNSHARP_D'}   = 11                      unless(exists($opt->{'DIST_UNSHARP_D'}));

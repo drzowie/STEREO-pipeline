@@ -1,9 +1,9 @@
 
-=head2 correlate_patch3
+=head2 correlate_patch4
 
 =for usage
 
- $of = correlate_patch3($im0, $im1, $loc0, $of0, $size0, $patchr0, $corr_thresh);
+ $of = correlate_patch4($im0, $im1, $loc0, $of0, $size0, $patchr0, $corr_thresh);
 
 =for ref
 
@@ -238,7 +238,7 @@ pp_def('fractional_correlate4',
        crot= 0;
 
 //printf( "\n\n");
-       for(mult=0.25; mult>=0.003; mult *= 0.75) {
+       for(mult=0.25; mult>=0.01; mult *= 0.66) {
 //printf("/");
  start_loop_$GENERIC(): 
 //printf("-");fflush(stdout);
