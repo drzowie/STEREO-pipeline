@@ -92,6 +92,10 @@ Points with values higher than MASK_THRESH are marked BAD if the MARK_BAD flag i
 This is useful for HI-2 data.  Points outside the specified radius are marked bad. Set
 this to 0 to disable it.
 
+=item MASK_HI2_STRIP - mask out the occulter in the HI-2 fields of view
+
+Set nonzero to mask it out.
+
 =item IMG_SIZE - require an image dimension
 
 Images whose height or width is different from IMG_SIZE are rejected.
@@ -107,7 +111,7 @@ $PDL::BIGPDL = 1;
 use PDL::NiceSlice;
 
 use strict;
-
+use PDL::Transform;
 
 sub read_files {
     my $VERSION = "2.3 22-May-2013";
@@ -116,8 +120,10 @@ sub read_files {
     my $opt = shift // {};
     my $defaults = {
 	neg=>'bad',
+	REGULARIZE_POINTING=>1,
 	MASK_THRESH => 500,
 	MASK_RADIUS => 0,
+	MASK_HI2_STRIP => 0,
 	MARK_BAD    => 1,
 	IMG_SIZE    => 1024,
 	REJECT_BY_SUM => 0.03,
@@ -438,7 +444,6 @@ sub read_files {
 
      print "Making badval masks...\n";
      $out->{MASK_CUBE} = ones(byte, $out->{RAW_CUBE}->dims);
-
 	 
      if($opt->{MARK_BAD}) {
 	 print "marking bad points...\n";
@@ -451,9 +456,12 @@ sub read_files {
 	     $out->{MASK_CUBE}->(:,:,($i)) .= $m > 0.999 ;
 	     print "$i ";
 	 }
-	 
-	 $out->{RAW_CUBE} = $out->{RAW_CUBE}->setbadif(!$out->{MASK_CUBE});
 
+	 ## Mask out the out-of-limits valus inside the image, and interpolate inward.
+	 $out->{RAW_CUBE} = $out->{RAW_CUBE}->setbadif(!$out->{MASK_CUBE});
+	 clean_baddies($out->{RAW_CUBE},0,100,50);
+
+	 # Now mask out more points...
 	 if($opt->{MASK_RADIUS}) {
 	     print "mask_radius is $opt->{MASK_RADIUS}\n";
 	     my $rvm =  ( rvals($out->{RAW_CUBE}->(:,:,(0))) < $opt->{MASK_RADIUS} )->byte;
@@ -462,14 +470,63 @@ sub read_files {
 	 }
 
 
-	 clean_baddies($out->{RAW_CUBE},0,100,50);
+	 if($opt->{MASK_HI2_STRIP}) {
+	     print "mask_hi2_strip - masking '$opt->{MASK_HI2_STRIP}'\n";
+	     my $stripmask = zeroes(byte,$out->{RAW_CUBE}->(:,:,(0))->dims);
+	     if($opt->{MASK_HI2_STRIP} =~ m/a/i) {
+		 $stripmask .= (xvals($out->{RAW_CUBE}->(:,:,(0))) >= 230) | ((yvals($out->{RAW_CUBE}->(:,:,(0)))-504)->abs >= 70);
+	     }
+	     elsif($opt->{MASK_HI2_STRIP} =~ m/b/i) {
+		 print STDERR "WARNING: read_files: STEREO-B HI2 stripmask magic numbers may not be correct\n";
+		 $stripmask .= (xvals($out->{RAW_CUBE}->(:,:,(0))) < 1024-230) | ((yvals($out->{RAW_CUBE}->(:,:,(0)))-504)->abs >= 70);
+	     } else {
+		 print STDERR "WARNING: read_files: MASK_HI2_STRIP must be 'A' or 'B' -- ignoring...\n";
+		 $stripmask .= ones($out->{RAW_CUBE}->(:,:,(0)));
+	     }
+	     $out->{MASK_CUBE} &= $stripmask->byte;
+	     $out->{RAW_CUBE}->indexND(0+whichND($stripmask==0)) .= 0;
+	 }
+	 
 	 print "\n";
+     }
+
+     if($opt->{REGULARIZE_POINTING}) {
+	 print "regularizing pointing...\n";
+
+	 $out->{ORIG_HDRS} = $out->{RAW_HDRS};
+	 $out->{RAW_HDRS} = [ map { 
+	     my $h = new Astro::FITS::Header( 
+		 Cards=> [   (tied %{$out->{ORIG_HDRS}->[$_]})   ->   cards     ] 
+		 );
+	     my %hh;
+	     tie( %hh, "Astro::FITS::Header", $h);
+	     \%hh;
+			      } (0..$#{$out->{ORIG_HDRS}})
+	     ];
+	 $out->{ORIG_CUBE} = $out->{RAW_CUBE}->copy;
+
+	 my $nhdrs = 0 + @{$out->{ORIG_HDRS}};
+
+	 for my $i(0..$nhdrs-1){
+	     my $a = $out->{ORIG_CUBE}->(:,:,($i));
+
+	     $a->sethdr($out->{ORIG_HDRS}->[$i]);
+
+	     print "$i/$nhdrs  ";
+	     my $b = $a->match($out->{ORIG_HDRS}->[$nhdrs/2],{method=>'j'});
+	       # Preserve date-obs and exptime so get_distortion_params knows what to do later.
+	     $b->hdr->{'DATE-OBS'} = $a->hdr->{'DATE-OBS'};
+	     $b->hdr->{'EXPTIME'} = $a->hdr->{'EXPTIME'};
+
+	     $out->{RAW_CUBE}->(:,:,($i)) .= $b;
+	     $out->{RAW_HDRS}->[$i] = $b->gethdr;
+	 }
+	 print "okay\n";
      }
 
 
     print "returning: cube is ".join("x",$ims->dims)."\n\n";
 
     return $out;
-
 }
 

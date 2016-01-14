@@ -1,5 +1,6 @@
 #-*-perl-*-
 use strict;
+use PDL::Transform;
 
 =head2 hi1_pipeline - invoke the background-subtraction pipeline on a single batch of hi1 data.
 
@@ -91,10 +92,12 @@ use Date::Format;
 sub hi1_pipeline {
     my $in_list = shift;
     my $opt = shift;
-    my $VERSION = "2.1 (21-May-2013)";
+    my $VERSION = "2.2 (29-Oct-2014)";
     my $i;
 
     my $opt_defaults = {
+
+	USE_F_MODEL=>"",
 
 	OUTPUT_DIR		=> 'processed', # where to put output files
 	OUTPUT_FILES		=> 1,           # Whether to generate output
@@ -274,6 +277,7 @@ sub hi1_pipeline {
 				       dir=>'06a-poly'
 		    })	if($opt->{PIPELINE_MOVIES});
 
+	print "output files...\n";
 
 	if($opt->{OUTPUT_FILES}) {
 	    `mkdir $opt->{OUTPUT_DIR}-S`;
@@ -285,6 +289,11 @@ sub hi1_pipeline {
 		my %hdrhash;
 		tie %hdrhash, "Astro::FITS::Header", $hdr;
 		$im->sethdr(\%hdrhash);
+
+		if(exists($hash->{ORIG_HDRS})) {
+		    printf("Resampling to original coords...");
+		    $im = $im->match($hash->{ORIG_HDRS}->[$i],{method=>'j'});
+		}
 		
 		$im->hdr->{DATE} = $datestr;
 		$im->hdr->{DATE_COMMENT} = "Pipeline time";
@@ -355,6 +364,7 @@ sub hi1_pipeline {
     # Shift back to instrument coordinates.
     print "Shift back to instrument...\n";
     shift_to_instrument($hash,$opt);
+    print "movie from cube...\n";
     movie_from_cube($hash->{CLEAN_CUBE},{fname=>"f-%3.3d.png",
 					 topt=>{size=>[10,11]},
 					 popt=>{j=>1,clut=>'sepia',cbr=>[0,1.5e-13]},
@@ -364,7 +374,7 @@ sub hi1_pipeline {
 					     cores=>4,
 					     dir=>'08-inst'
 		    })	if($opt->{PIPELINE_MOVIES});
-    
+    print "final_poly...\n";
 
     if($opt->{FINAL_POLY}) {
 	print "Removing polynomials...\n";
@@ -383,12 +393,20 @@ sub hi1_pipeline {
     }
 
     # Dump output to files...
+    print "Output files...\n";
     if($opt->{OUTPUT_FILES}) {
         `mkdir $opt->{OUTPUT_DIR}-M`;
 	for $i($opt->{CLEAN_MARGIN_FRAMES}..$hash->{CLEAN_CUBE}->dim(2)-1-$opt->{CLEAN_MARGIN_FRAMES}) {
 	    my $im = float( $hash->{CLEAN_CUBE}->(:,:,($i)) );
 
 	    $im->sethdr($hash->{RAW_HDRS}->[$i]);
+
+	    if(exists($hash->{ORIG_HDRS})) {
+		printf("Resampling to original coords...");
+		$im = $im->match($hash->{ORIG_HDRS}->[$i],{method=>'j'});
+	    }
+
+
 	    $im->hdr->{DATE} = $datestr;
 	    $im->hdr->{DATE_COMMENT} = "Pipeline time";
 	    $im->hdr->{HISTORY} .= "Processed with SwRI HI_1 pipeline $VERSION. Filters:\n";
@@ -403,6 +421,7 @@ sub hi1_pipeline {
 				 $im->hdr->{'DATE-OBS'}, 
 				 $hash->{RAW_HDRS}->[0]->{'DATE-OBS'}
 		);
+
 
 	    printf("Writing file %d of %d: %s\n",  $i,  $hash->{CLEAN_CUBE}->dim(2) - 1,  $fname);
 	    wfits($im, $fname);
