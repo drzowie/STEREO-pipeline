@@ -1,0 +1,147 @@
+=head2 fixup_cel_mask
+
+=for ref
+
+Find points in CEL_CUBE that are marked bad, using the CEL_MASK field.
+Points that are bad in just a few frames are patched up in the temporal
+direction; and those points are patched out of the CEL_MASK field.
+At the end, CEL_CUBE values that are still BAD in the CEL_MASK are set to
+a numeric value of 0.
+
+For runs with two good-value endpoints, patched up points are linearly interpolated
+between the two endpoints.  For runs with only one good-value endpoint, the 
+patched up points are constantly extrapolated from the one endpoint.
+
+=for history
+
+Craig DeForest, 3-Feb-2016
+
+=cut
+
+sub fixup_cel_mask {
+    my $hash = shift;
+    my $opt = shift // {};
+
+    $opt->{MASK_PATCH_MIN_PCT} = 50 unless(defined($opt->{MASK_PATCH_MIN_PCT}));  # A point must be good in 50% of images to be patched
+    $opt->{MASK_PATCH_MAX_RUN} = 25 unless(defined($opt->{MASK_PATCH_MAX_RUN}));  # No run of bad points can be longer than 25 frames
+    $opt->{MASK_PATCH_ZERO}    =  0 unless(defined($opt->{MASK_PATCH_ZERO}));     # zero out bad values at the end if true.
+
+    our $thresh = $opt->{MASK_PATCH_MIN_PCT} * $hash->{CEL_MASK}->dim(2) / 100;
+    print "thresh=$thresh\n";
+    print "opt->{MASK_PATCH_MIN_PCT} = $opt->{MASK_PATCH_MIN_PCT}\n";
+    print "hash->{CEL_MASK->dim(2) = ".($hash->{CEL_MASK}->dim(2))."\n";
+
+    $cm = (($hash->{CEL_MASK}==0)->convolveND(ones(byte,5,5),{method=>'direct'})==0);
+
+    # patchup_mask -- set of pixels for which we shouldn't even bother.
+    our $patchup_mask = (  ($cm->mv(-1,0) == 0)->sumover <= $thresh );
+
+    # Create output variables for the helper.
+    my $a = null;
+    my $b = null;
+    my $c = null;
+
+    # Do the actual work in PP.
+    PDL::fixup_cel_mask_helper($hash->{CEL_CUBE},$cm,$patchup_mask,$a,$b,$c,$opt->{MASK_PATCH_MAX_RUN});
+
+    # Copy the work back out.
+    $hash->{CEL_CUBE} .= $a;
+    $hash->{CEL_MASK} .= $b;
+
+    our $pm = $c;
+    return $hash;
+}
+
+no PDL::NiceSlice;
+use Inline Pdlpp => <<'EOF';
+
+pp_def('fixup_cel_mask_helper',
+       Pars => 'cube(a,b,c); mcube(a,b,c); mask(a,b); [o]ocube(a,b,c); [o]omcube(a,b,c); [o]omask(a,b);',
+       GenericTypes=>['F','D'],
+       OtherPars => "int rl",
+       Code => <<'EOC'
+PDL_Indx xx,yy,tt,ri,run;
+PDL_Indx st;
+$GENERIC() alpha,samp1,samp2;
+	 loop(b) %{
+	   loop(a) %{
+	        // Copy the element from the don't-bother mask.
+		$omask() = $mask();
+
+		if( $mask()==0 ) {
+		    // If we're outside the fixit mask, just copy everything across.
+		   loop(c) %{
+		     $ocube() = $cube();
+		     $omcube() = $mcube();
+		   %}
+	        } else {
+
+		    // If we're inside the fixit mask, try to patch stuff up temporally.
+	           st = -1;
+
+		   
+		   // Walk through the time dimension finding runs of invalid numbers
+		   for(tt=0;tt<$SIZE(c);tt++) {
+
+		        // Copy the data itself, and also the mask cube value, into the outputs.
+		   	$ocube(c=>tt) = $cube(c=>tt);
+			$omcube(c=>tt) = $mcube(c=>tt);
+
+			// No start yet -- check to see if we should start up a run of replacable pixels
+		        if( st<0 ) {
+			  if( $mcube(c=>tt) == 0 ) {
+			    st = tt; 
+			  }
+			}
+
+			// If there's a valid start,  check if we're still in the run
+			else {
+ 			  if( $mcube(c=>tt) != 0 ) {
+			    run = tt - st;
+			    // accumulate the maximum replaced run in the output mask
+			    if(run > $omask()) {
+			     $omask() = run;
+			    }
+
+			    // Still OK for run length?
+			    if(tt - st <= $COMP(rl)) {
+
+			       // If the run length is short enough, check for ending.
+			       if(st > 0) {
+			          // fully qualified run -- interpolate linearly
+			          for(ri=0; ri<run; ri++) {
+ 			             alpha = (ri+1)/($GENERIC())(run+1);
+				     $ocube(c=>st+ri) = $cube(c=>st-1)*(1-alpha) + $cube(c=>tt)*alpha;
+				     $omcube(c=>st+ri) = 1;
+			          } // end of run loop
+			       } // end of interpolation conditional
+                               else {
+			         // run starts at start of t dim -- fill with constant
+				 for(ri=0;ri<tt;ri++) {
+				    $ocube(c=>ri) = $cube(c=>tt);
+				    $omcube(c=>ri) = 1;
+				 }
+                               }
+			    } // End of runlength check.   Ignore if run is too long.
+			    st = -1; // done interpolating &c.  Seal off the run and prepare to start over.
+			  } // end of end-of-run check.
+		        } // end of st<0 conditional.
+           	  } // end of tt loop
+
+		  // Check for a run going off the end
+		  if( st>0 && tt-st <= $COMP(rl) ) {	
+		  	for(ri=st; ri<tt; ri++) {
+			    $ocube(c=>ri) = $cube(c=>st-1);
+			    $omcube(c=>ri) = 1;
+			}
+		  }
+	       } // end of mask conditional
+            %}
+	 %}
+fflush(stdout);
+	
+EOC
+	);
+
+EOF
+; 
