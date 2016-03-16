@@ -64,7 +64,9 @@ sub shift_to_celestial {
     $opt->{'ALIGN_DEJITTER'} = 1    unless(defined $opt->{'ALIGN_DEJITTER'});
     $opt->{'ALIGN_PATCHSIZE'} = 50  unless(defined $opt->{'ALIGN_PATCHSIZE'});
     $opt->{'INTERP_METHOD'} = 'j'   unless(defined $opt->{'INTERP_METHOD'}); # use default for science
-    
+    $opt->{'INTERP_BLUR'} = 2       unless(defined $opt->{'INTERP_BLUR'}); # use default
+    $opt->{'ALIGN_PATCH_MASK'} = 1  unless(defined $opt->{'ALIGN_PATCH_MASK'});
+
     my $i;
     my $xr = $hash->{'D_PARAMS'}->{'xr'};
     my $yr = $hash->{'D_PARAMS'}->{'yr'};
@@ -108,7 +110,7 @@ sub shift_to_celestial {
 				      ]
 	);
     
-    my $blur=2;
+    my $blur=$opt->{INTERP_BLUR};
     my $master_patch = ($hash->{'BKSUB_CUBE'}->(:,:,($dex0)) * $hash->{'MASK_CUBE'}->(:,:,($dex0))) -> map(
 	$t_patchcrop, 
 	\@align_patchsize,
@@ -178,21 +180,25 @@ sub shift_to_celestial {
 	    $hash->{'BKSUB_CUBE'}->(:,:,($i))->map(
 		$t_crop x !$t_nl x $t_o x $t_nl, 
 		[$xr->at(1)-$xr->at(0), $yr->at(1)-$yr->at(0)], 
-		{method=>$opt->{'INTERP_METHOD'}, pix=>1}
+		{method=>$opt->{'INTERP_METHOD'}, pix=>1,blur=>$blur}
 	    );
 	    
 	    print "mask...";
-	$hash->{'CEL_MASK'}->(:,:,($i)) .= 
-	    $hash->{'MASK_CUBE'}->(:,:,($i))->map(
+	    my $mask_dilate;
+	    $mask_dilate = int(($opt->{INTERP_BLUR}+1)*3);
+	    $mask_dilate += ($mask_dilate%2==0);
+	    print "md: $mask_dilate ";
+	$hash->{'CEL_MASK'}->(:,:,($i)) .=
+	    ( $hash->{'MASK_CUBE'}->(:,:,($i))->map(
 		$t_crop x !$t_nl x $t_o x $t_nl,
 		[$xr->at(1)-$xr->at(0),$yr->at(1)-$yr->at(0)],
 		{method=>'s',pix=>1}
-	    );
+	    ) != 0)->convolveND(ones($mask_dilate,$mask_dilate)) >= $mask_dilate*$mask_dilate;
 	    
 	print (($hash->{CEL_MASK}->(:,:,$i)->sum)." OK points\n");
 
     }
-    
+
     push(@{$hash->{log}}, "  shift_to_celestial v$VERSION");    
     return $hash;
 }

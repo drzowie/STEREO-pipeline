@@ -40,6 +40,10 @@ sub t_nl {
 		    $ys = cos(3.14159/2 * ($d->((1))-512)/512.0);
 		    $xs = sin(3.14159*3/2   *   ($d->((0))-512)/512.0);
 		    $d->((0)) += $qq * $xs * $ys;
+		    if(defined($qqq)) {
+			$xs = sin(3.14159/2*($d->((0))-512)/512.0);
+			$d->((0)) += $qqq * $xs;
+		    }
 		}
 		return $d;
 	    },
@@ -47,6 +51,10 @@ sub t_nl {
 		my $d = $_[0]->copy;
 		# Reverse order of horizontal and vertical "fixes" to improve approximation.
 		if(defined $qq) {
+		    if(defined($qqq)) {
+			$xs = sin(3.14159/2*($d->((0))-512)/512.0);
+			$d->((0)) -= $qqq*$xs;
+		    }
 		    $ys = cos(3.14159/2 * ($d->((1))-512)/512.0);
 		    $xs = sin(3.14159*3/2  * ($d->((0))-512)/512.0);
 		    $d->((0)) -= $qq * $xs * $ys

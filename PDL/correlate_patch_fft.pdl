@@ -49,9 +49,17 @@ sub correlate_patch_fft {
 
   $ac = $im0->range( $loc0 - $patchsize,        $patchsize*2+1, 't' )->(*2)->sever;
   $bc = $im1->range( $loc0 - $patchsize + $of0, $patchsize*2+1, 't' )->(*2,-1:0:-1,-1:0:-1)->sever;
+  
 
   $ac->((1)) .= 0;
   $bc->((1)) .= 0;
+
+  $ac->((0)) -= $ac->((0))->average;
+  $bc->((0)) -= $bc->((0))->average;
+  $bc->((0), 0:$sizer0-1, :           ) .= 0;
+  $bc->((0), -$sizer0:-1, :           ) .= 0;
+  $bc->((0), :,           0:$sizer0-1 ) .= 0;
+  $bc->((0), :,           -$sizer0:-1 ) .= 0;
 
   my ($az,$bz);
   $az = $ac->((0)); $az->where(!isfinite($az)) .= 0;
@@ -67,12 +75,18 @@ sub correlate_patch_fft {
 
   $cfc->((0),(0),(0)) .= 0;  # subtract mean
 
-  my $cc = ifft2($cfc) / $az->nelem / $bz->nelem;
+  my $cc = ifft2($cfc);
   my $c = $cc->((0),-1:0:-1,-1:0:-1);
+  $c->($sizer0:-$sizer0-1, $sizer0:-$sizer0-1) .= 0;  # mask out impossible values.
 
+  my $cmax = $c->max;
   # Find peak correlation coefficient and cut it out
-  my $coords = whichND($c==$c->max)->(:,(0));
+  my $coords = whichND($c==$cmax)->(:,(0));
   $coords -= $c->shape * ($coords >= $c->shape/2);
+
+  # Calculate actual peak correlation coefficient
+  $cmax /= sqrt(sum($ac*$ac));
+  $cmax /= sqrt(sum($bc*$bc));
   
   $cutout = $c->range($coords->(:,(0))-$rcut,[$rcut*2+1,$rcut*2+1],'p');
 
@@ -80,5 +94,8 @@ sub correlate_patch_fft {
   my $ndc = ndcoords($cutout) - $rcut;
   my $moment1 = ($cutout * $ndc->mv(0,-1))->sumover->sumover / $cutout->sumover->sumover;
 
+  if(wantarray) {
+  		return ($coords + $moment1,  $cmax);
+  }
   return $coords + $moment1;
 }

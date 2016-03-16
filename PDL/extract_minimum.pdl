@@ -79,7 +79,11 @@ pp_def('extract_minimum_helper',
 	   /* Initialize minimum cache... */
 	   for(ii=0; ii<$SIZE(bar); ii++) {
 	     int idex = (ii<$SIZE(n)) ? ii : ($SIZE(n)-1) ;
-	     $min_cache(bar=>ii) = $in(n=>idex,nn=>jj,nnn=>kk);
+	     $GENERIC() a = $in(n=>idex,nn=>jj,nnn=>kk);
+	     if(isfinite(a) && a>-1 && a<1) 
+	     	     $min_cache(bar=>ii) = a;
+	     else
+		     $min_cache(bar=>ii) = 1;
 	     if( $min_cache(bar=>ii) > $min_cache(bar=>cache_maxdex) ) {
 	       cache_maxdex = ii;
 	     }
@@ -99,7 +103,7 @@ pp_def('extract_minimum_helper',
 		   /* Check if the current value is smaller than the largest element of the cache. */
 		   /* If it is, put it in the cache, and then update the cache maxdex.             */
 		   $GENERIC() inval = $in(n=>ii, nn=>jjs, nnn=>kks);
-		   if( inval < $min_cache(bar=>cache_maxdex) ) {
+		   if( isfinite(inval) && inval > -1 && inval < 1 && inval < $min_cache(bar=>cache_maxdex) ) {
 		     int ijk;
 		     $min_cache(bar=>cache_maxdex) = inval;
 		     for( ijk=0; ijk<$SIZE(bar); ijk++ ) {

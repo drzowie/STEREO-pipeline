@@ -39,17 +39,22 @@ sub get_distortion_params2 {
     $opt->{'DIST_CORR_FNAME'}  = "correlations.pl"      unless(exists($opt->{'DIST_CORR_FNAME'}));
     $opt->{'DIST_PARAM_FNAME'} = "distortion-params.pl" unless(exists($opt->{'DIST_PARAM_FNAME'}));
     $opt->{'DIST_CORR_NSAMP'}  = 30                     unless(exists($opt->{'DIST_CORR_NSAMP'}));
-    $opt->{'DIST_CORR_RSIZE'}  = 35                      unless(exists($opt->{'DIST_CORR_RSIZE'}));
-    $opt->{'DIST_CORR_PSIZE'}  = 35                      unless(exists($opt->{'DIST_CORR_PSIZE'}));
-    $opt->{'DIST_MIN_PCORR'}   = 0.985                   unless(exists($opt->{'DIST_MIN_PCORR'}));
-    $opt->{'DIST_CORRTIME'}    = 6                       unless(exists($opt->{'DIST_CORRTIME'}));
-    $opt->{'DIST_GUESS_DRIFTRATE'} = 72/5                unless(exists($opt->{'DIST_GUESS_DRIFTRATE'}));
-    $opt->{'DIST_UNSHARP_D'}   = 11                      unless(exists($opt->{'DIST_UNSHARP_D'}));
+    $opt->{'DIST_CORR_RSIZE'}  = 20                     unless(exists($opt->{'DIST_CORR_RSIZE'}));
+    $opt->{'DIST_CORR_PSIZE'}  = 30                     unless(exists($opt->{'DIST_CORR_PSIZE'}));
+    $opt->{'DIST_CORR_NCPU'} = 3                        unless(exists($opt->{'DIST_CORR_NCPU'}));
+    $opt->{'DIST_MIN_PCORR'}   = 0.99                   unless(exists($opt->{'DIST_MIN_PCORR'}));
+    $opt->{'DIST_CORRTIME'}    = 6                      unless(exists($opt->{'DIST_CORRTIME'}));
+    $opt->{'DIST_GUESS_DRIFTRATE'} = 72/5               unless(exists($opt->{'DIST_GUESS_DRIFTRATE'}));
+    $opt->{'DIST_UNSHARP_D'}   = 11                     unless(exists($opt->{'DIST_UNSHARP_D'}));
+    $opt->{'DIST_NDELAYS'} =  2                         unless(exists($opt->{'DIST_NDELAYS'}));                  
     $opt->{'NPROC'} = 3                                  unless(exists($opt->{'NPROC'}));
     $opt->{'PIXEL_YRANGE'} = pdl(75,950)  unless(exists($opt->{'PIXEL_YRANGE'}));
     $opt->{'PIXEL_XRANGE'} = undef        unless(exists($opt->{'PIXEL_XRANGE'}));
+    $opt->{'DIST_FIT_ITER'} = 15                         unless exists($opt->{DIST_FIT_ITER});
     $opt->{'DEBUG'} = 0 unless(exists($opt->{'DEBUG'}));
-
+    $opt->{'locof'} = undef unless(exists($opt->{'locof'}));
+    print "DIST_NDELAYS=$opt->{DIST_NDELAYS}\n";
+    
     ##############################
     # Convert timestamps to UNIX time...
     # Add in "EXPTIME"/2 to get the average time of the exposure. 
@@ -81,6 +86,7 @@ sub get_distortion_params2 {
     
     ##########
     # Pick two images near the middle of the data set, nominally 5 days apart...
+    # also an extra one 1/3 of the way between them, to do extra correlation.
     my $tstart = $tmid - $opt->{'DIST_CORRTIME'}*3600*24 / 2;
     my $st_dex;
     if($times->((0))<=$tstart) {
@@ -91,92 +97,242 @@ sub get_distortion_params2 {
     
     my $tend = $times->($st_dex) + $opt->{'DIST_CORRTIME'} * 3600 * 24;
     my $en_dex;
+    my $mid_dex;
     if($times->((-1))>=$tend) {
 	$en_dex = min( which($times >= $tend) );
     } else {
 	$en_dex = $times->dim(0)-1;
     }
+    $mid_dex = ($st_dex*2 + $en_dex*1)/3;
     
     my $im0 = $hash->{'BKSUB_CUBE'}->(:,:,($st_dex))->sever;
     my $im1 = $hash->{'BKSUB_CUBE'}->(:,:,($en_dex))->sever;
+    my $im2 = $hash->{'BKSUB_CUBE'}->(:,:,($mid_dex))->sever;
+    
     my $t0 = $times->(($st_dex));
     my $t1 = $times->(($en_dex));
+    my $t2 = $times->(($mid_dex));
     
     if($opt->{DIST_UNSHARP_D}) {
 	print "unsharp masking...";
-	$im0 -= $im0->med2d(ones($opt->{DIST_UNSHARP_D},$opt->{DIST_UNSHARP_D}));
-	$im1 -= $im1->med2d(ones($opt->{DIST_UNSHARP_D},$opt->{DIST_UNSHARP_D}));
+	my $kr = rvals($opt->{DIST_UNSHARP_D}*2.5,$opt->{DIST_UNSHARP_D}*2.5);
+	my $k = -exp($kr*$kr/$opt->{DIST_UNSHARP_D}/$opt->{DIST_UNSHARP_D}*4);
+	$k /= $k->sum;
+#	$im0 -= $im0->convolveND($k,{method=>'direct'});
+	#	$im1 -= $im1->convolveND($k,{method=>'direct'});
+	our $gdp_im0a = $im0->copy;
+	our $gdp_im1a = $im1->copy;
+	$im0 -= minismooth($im0,$opt->{DIST_UNSHARP_D},$opt->{DIST_UNSHARP_D}/2)->convolveND($k,{bound=>"m",method=>'direct'});
+	$im1 -= minismooth($im1,$opt->{DIST_UNSHARP_D},$opt->{DIST_UNSHARP_D}/2)->convolveND($k,{bound=>"m",method=>"direct"});
+	$im2 -= minismooth($im2,$opt->{DIST_UNSHARP_D},$opt->{DIST_UNSHARP_D}/2)->convolveND($k,{bound=>"m",method=>"direct"});
+	our $gdp_im0 = $im0->copy;
+	our $gdp_im1 = $im1->copy;
+	our $gdp_im2 = $im2->copy;
 	print "ok\n";
     }
     
     $im0->sethdr($hash->{'RAW_HDRS'}->[$st_dex]);
     $im1->sethdr($hash->{'RAW_HDRS'}->[$en_dex]);
+    $im2->sethdr($hash->{'RAW_HDRS'}->[$mid_dex]);
     
     use PDL::Transform;
     
     my $guess_offset = ($t1 - $t0)/3600/24   * $opt->{DIST_GUESS_DRIFTRATE};
+    my $guess_offset02 = ($t2 - $t0)/3600/24   * $opt->{DIST_GUESS_DRIFTRATE};
+    my $guess_offset21 = ($t1 - $t2)/3600/24   * $opt->{DIST_GUESS_DRIFTRATE};
     my $deltat = ($t1-$t0)/3600/24;
-    
+    my $deltat2 =($t2-$t0)/3600/24;
     print "Correlating between frame $st_dex and frame $en_dex -- interval is $deltat days...\n";
+    print "Also mid_dex - interval from st is $deltat2 days...";
     
     my @of = ();
     my @loc = ();
+    my @of02 = ();
+    my @of21 = ();
+    my @loc02 = ();
+    my @loc21 = ();
+    
     my $step0 = pdl($hash->{'BKSUB_CUBE'}->dim(0)/($opt->{'DIST_CORR_NSAMP'}+1))->floor;
     my $step1 = pdl($hash->{'BKSUB_CUBE'}->dim(1)/($opt->{'DIST_CORR_NSAMP'}+1))->floor;
+    
     my $start0 = pdl(($hash->{'BKSUB_CUBE'}->dim(0) - $opt->{'DIST_CORR_NSAMP'} * $step0)/2)->floor;
     my $start1 = pdl(($hash->{'BKSUB_CUBE'}->dim(1) - $opt->{'DIST_CORR_NSAMP'} * $step1)/2)->floor;
     
-    for( $j=0; $j < $opt->{'DIST_CORR_NSAMP'}; $j++ ) {
-	for($i=0; $i < $opt->{'DIST_CORR_NSAMP'}; $i++) {
-	    my $loc = pdl( $start0 + $i * $step0,
-			   $start1 + $j * $step1
-		);
-	    my $a = correlate_patch4($im0, $im1, $loc,
-				     pdl( $guess_offset, 0 ),
-				     $opt->{'DIST_CORR_RSIZE'}/2,
-				     $opt->{'DIST_CORR_PSIZE'}/2,
-				     $opt->{'DIST_MIN_PCORR'});
-
-	    if(defined $a){
-		push(@of,$a);
-		push(@loc, $loc);
-		if(all(isfinite($a))) {
-		    print ".";
-		} else {
-		    print "-";
+    print "\n";
+    my($of,$loc);
+    if($opt->{locof}) {
+	print "Using parameterized locof passed in as option!\n";
+	$of = $opt->{locof}->{of}->copy;
+	$loc = $opt->{locof}->{loc}->copy;
+    } else {
+	for( $j=0; $j < $opt->{'DIST_CORR_NSAMP'}; $j++ ) {
+	    printf("Row %3d of %3d: ",$j,$opt->{'DIST_CORR_NSAMP'}); 
+	    for($i=0; $i < $opt->{'DIST_CORR_NSAMP'}; $i += ($opt->{'DIST_CORR_NCPU'}||1)) {
+		my $roundrobin = 0;
+		my %subs = ();
+		
+		# Fork off $NCPU copies of ourselves if necessary
+		print "|";
+		
+		
+		if($opt->{'DIST_CORR_NCPU'} > 1) {
+		  forker: for($roundrobin = 1; $roundrobin < $opt->{'DIST_CORR_NCPU'}; $roundrobin++) {
+		      my $file = sprintf("/tmp/%s-subproc-%d.tmp",$$,$roundrobin);
+		  open OUTPUT,">$file";
+		      
+		      my $pid = fork();
+		      last forker unless($pid);
+		      
+		      $subs{$pid} = $file;
+		  }
 		}
+		
+		# Do the meat.  But first we have to adjust $i...
+		my $ii = $i;
+		if($roundrobin) {
+		    $ii += $roundrobin - 1;
+		}
+		
+		my $loc = pdl( $start0 + $ii * $step0,
+			   $start1 + $j * $step1
+		    );
+		
+		## This first pass is the short interval.  We only
+		## bother to do the correlation if we're doing two
+		## delta-tees.
+		my $a;
+		if($opt->{'DIST_NDELAYS'}>1) {
+		    $a = correlate_patch4($im0, $im2, $loc,
+					 pdl( $guess_offset02, 0 ),
+					  $opt->{'DIST_CORR_RSIZE'}/2,
+					 $opt->{'DIST_CORR_PSIZE'}/2,
+					  $opt->{'DIST_MIN_PCORR'});
+		    if(defined $a){
+			push(@of02,$a);
+			push(@loc02, $loc);
+			if(all(isfinite($a))) {
+			    print ".";
+			} else {
+			    print "-";
+			}
+		    }
+		    else {
+			$a = asin(pdl(1.1,1.1));
+		    }
+		} else {
+		    # Not doing this one, just generate a pair of NaNs for the offset.
+		$a = asin(pdl(1.1,1.1));
+		}
+		
+		# This second pass is the long interval (~5 days for HI-2).
+		# We do this every time.
+		my $b = correlate_patch4($im0, $im1, $loc,
+					 pdl( $guess_offset, 0 ),
+					 $opt->{'DIST_CORR_RSIZE'}/2,
+					 $opt->{'DIST_CORR_PSIZE'}/2,
+					 $opt->{'DIST_MIN_PCORR'});
+		if(defined $b){
+		    push(@of,$b);
+		    push(@loc, $loc);
+		    if(all(isfinite($b))) {
+			print ".";
+		    } else {
+			print "-";
+		    }
+		}
+		else {
+		    #		print "!";
+		    $b = asin(pdl(1.1,1.1));
+		}
+		
+		
+		
+		# Now check if we are a daughter process.  If so, write to the temp file.  If not, do our business.
+		if($roundrobin && ($roundrobin < $opt->{'DIST_CORR_NCPU'})) {
+		    printf OUTPUT "%.10e, %.10e, %.10e, %.10e, %.10e, %.10e\n", $loc->list, $a->list, $b->list;
+		    close OUTPUT;
+		    exit(0); # Exit of daughter process
+		    
+		} else {
+		    # We're in a parent or singleton process. Snarf up tempfile stuff and put it in the right place.
+		    while(keys %subs) {
+			my $pid = wait();
+			if($subs{$pid}) {
+			    open FOO,"<".$subs{$pid};
+			    my $line = <FOO>;
+			    close FOO;
+			    unlink $subs{$pid};
+			    undef $subs{$pid};
+			    my @fields = split /\,/,$line;
+			    if(@fields==4) {
+				my $loc = pdl($fields[0],$fields[1]);
+				my $of02 = pdl($fields[2],$fields[3]);
+				my $of=pdl($fields[4],$fields[5]);
+				push(@of02, $of02);
+				push(@of, $of);
+				push(@loc,$loc);
+			    }
+			} else {
+			    if($pid<0) {
+				%subs = ();
+			    }
+			}
+		    }
+		}
+		
 	    }
-	    else {
-		print "!";
-	    }
+	    print "\n";
 	}
-	print "\n";
+	our $gdp_loc = pdl(@loc); # debugging...
+	our $gdp_of = pdl(@of);
+	
+	my $of0 = pdl(@of);
+	my $looplocs = pdl(@loc);
+	
+	$mask = isfinite($of0->((0))) & isfinite($of0->((1)));
+	print "mask is $mask\n";
+	$loc = $looplocs->(:, which($mask));
+	$of = $of0->(:, which($mask));
+	our $locof = {loc=>$loc->copy, of=>$of->copy};
+    } # end of correlation section
+    
+    my($of02, $mask02, $loc02);
+    if($opt->{DIST_NDELAYS}>1){
+	$of02 = pdl(@of02);
+	$mask02 = isfinite($of02->((0))) & isfinite($of02->((1)));
+	$of02 = $of02->(:,which($mask02))->sever;
+	$loc02 = pdl(@loc02)->(:,which($mask02));
     }
-    
-    my $of0 = pdl(@of);
-    my $looplocs = pdl(@loc);
-    
-    my $mask = isfinite($of0->((0))) & isfinite($of0->((1)));
-    print "mask is $mask\n";
-    my $loc = $looplocs->(:, which($mask));
-    my $of = $of0->(:, which($mask));
+
+
     my $h = { of     => $of, 
-	      loc    => $loc, 
-	      deltat => $deltat, 
+	      loc    => $loc,
+	      of02   => $of02,
+	      loc02  => $loc02,
+	      deltat => $deltat,
+	      deltat2 => $deltat2,
 	      guess  => $guess_offset, 
 	      hdr0   => $hash->{'RAW_HDRS'}->[$st_dex], 
 	      hdr1   => $hash->{'RAW_HDRS'}->[$en_dex]
     };
+    use PDL::IO::Dumper;
+    fdump($h, "distortion-hash.pl");
     $hash->{'CORR'} = $h;
 
     ##############################
-    # Now check if theres's a dump file for the actual parameterized fit.
+    # Now fit the distortion data.
 
     printf("Fitting correlation info...\n");
 	
     # Define convenience variables for the centroids
     my $ct1 = $hash->{'CORR'}->{loc};
     my $ct2 = $hash->{'CORR'}->{of} + $ct1;
+    my($ct1_02, $ct2_02);
+    if($opt->{DIST_NDELAYS}>1){
+	$ct1_02 = $hash->{'CORR'}->{loc02};
+	$ct2_02 = $hash->{'CORR'}->{of02}+$ct1_02;
+    }
+    
     print "ct1 is ".join("x",$ct1->dims)."\n";
     my $ii=0;
     
@@ -199,19 +355,37 @@ sub get_distortion_params2 {
 		     $ct1->((1)) <= $yr->((1)) &
 		     $ct2->((1)) >= $yr->((0)) &
 		     $ct2->((1)) <= $yr->((1)));
+    p "ct1 is $ct1; ct2 is $ct2\n";
     $ct1 = $ct1->(:,$ctwhich)->sever;
     $ct2 = $ct2->(:,$ctwhich)->sever;
+    
+    if($opt->{DIST_NDELAYS} > 1){
+	$ctwhich_02 = which($ct1_02->((0)) >= $xr->((0)) &	
+			    $ct1_02->((0)) <= $xr->((1)) &
+			    $ct2_02->((0)) >= $xr->((0)) &
+			    $ct2_02->((0)) <= $xr->((1)) &
+			    $ct1_02->((1)) >= $yr->((0)) &
+			    $ct1_02->((1)) <= $yr->((1)) &
+			    $ct2_02->((1)) >= $yr->((0)) &
+			    $ct2_02->((1)) <= $yr->((1)));
+	$ct1_02 = $ct1_02->(:,$ctwhich_02)->sever;
+	$ct2_02 = $ct2_02->(:,$ctwhich_02)->sever;
+    }	
     print "kept ".$ct1->dim(1)." points for fit (xr=$xr, yr=$yr)...\n";
     
     # Calculate pixel offset of each boundary toward the middle using the guess rotation rate...
     my $dt_to_center = ($hash->{'UTIME'}->((-1)) - $hash->{'UTIME'}->((0)))/2  / 3600 / 24;
     my $margin = $dt_to_center / $hash->{'CORR'}->{'deltat'} * $hash->{'CORR'}->{'guess'};
+    my $margin2 = $dt_to_center / $hash->{'CORR'}->{'deltat2'} * $hash->{'CORR'}->{'guess'};
     
     
     # shrink horizontal range by the pixel offset calculated, with an extra 5% margin.
     print "\n***\nshrinking xr by $margin\n\n";
+    my $xr2 = $xr->copy;
     $xr += pdl(1,-1) * $margin * 1.05 ;
+    $xr2 += pdl(1,-1) * $margin2 * 1.05;
     $xr = floor($xr+0.5);
+    $xr2 = floor($xr2+0.5);
     print "column range is $xr "."(margin is $margin)\n";
     
     my $master_hdr = $hash->{'RAW_HDRS'}->[(0+@{$hash->{'RAW_HDRS'}})/2];
@@ -219,9 +393,13 @@ sub get_distortion_params2 {
     my $ct1a;
     my $ct2a;
     
+    my $ct1a_02;
+    my $ct2a_02;
+    
     # Define a fit heuristic -- RMS error in location
     my $heur_ret;
-    
+
+print  "ct1 dims: ".join('x',$ct1->dims)."; ct2 dims: ".join("x",$ct2->dims)."\n";    
     my $heur = sub {
 	my $dx = shift;
 	my ($delta1, $delta2, $deltamu, $roll_angle, $r2, $orbital_rotation, $q, $qq) = $dx->list;
@@ -229,19 +407,31 @@ sub get_distortion_params2 {
 	$delta1 /= 100;
 	$delta2 /= 100;
 	my $tnl_params = [$master_hdr,$deltamu, $roll_angle, $r2, $delta1, $delta2, $q, $qq];
-	
 	my $tnl = t_nl(@$tnl_params);
 	my $to =  t_linear(pre=>[$orbital_rotation,0]);
+	my $to_02 =  t_linear(pre=>[$orbital_rotation * $deltat2/$deltat,0]);
 	
+	my $t_heur_02 = !$tnl x $to_02 x $tnl;
 	my $t_heur = !$tnl x $to x $tnl;
 	
 	$ct1a = $ct1->apply( $t_heur );
-	$ct2a = $ct2->apply( !$t_heur);
+	$ct2a = $ct2->apply( !$t_heur );
 	
 	my $dists = (($ct1a - $ct2a)*($ct1a - $ct2a))->sumover->sqrt;
-	$avg = $dists->avg;
+
+	if($opt->{'DIST_NDELAYS'}>1){
+	    $ct1a_02 = $ct1_02->apply( $t_heur_02 );
+	    $ct2a_02 = $ct2_02->apply( !$t_heur_02 );
+	    my $dists_02 = (($ct1a_02-$ct2a_02)*($ct1a_02-$ct2a_02))->sumover->sqrt;
+	    $avg = ($dists->avg + $dists_02->avg)/2;
+	    $avg = 1e6 if(any(isbad($dists_02)));
+	} else {
+	    $avg = $dists->avg;
+	}
+	
 	$avg = 1e6 if(!isfinite($avg));
 	$avg = 1e6 if(any(isbad($dists)));
+
 	
 	if($opt->{DISPLAY}) {
 	    our $ww0,$ww1;
@@ -267,14 +457,14 @@ sub get_distortion_params2 {
     $ii = 0;
     print "initial fit...\n";
     # Initial fit -- "basic six" parameters
-    for(;$ii<5;$ii++) {
+    for(;$ii<$opt->{DIST_FIT_ITER};$ii++) {
 	$nlx = amoeba($heur, $nlx, $siz/sqrt($ii+1), 1e-6, 1e-9, 1e4);
 	push(@nlx, $nlx);
     }
-    print "fitted with the basic six -- refining....\n";
+    print "fitted with the basic six -- refiningw with 8....\n";
     $nlx = $nlx->append(pdl(0,0));
     
-    my $ii_targ = $ii+10;
+    my $ii_targ = $ii+$opt->{DIST_FIT_ITER};
     for(;$ii<$ii_targ;$ii++) {
 	$nlx = amoeba($heur, $nlx, $siz/sqrt($ii+1), 1e-6, 1e-9, 1e4);
 	push(@nlx, $nlx);
@@ -284,11 +474,19 @@ sub get_distortion_params2 {
     # Discard the worst 20% of the distances (ad hoc) to remove occasional missed stars
     $dists = (($ct1a-$ct2a)*($ct1a-$ct2a))->sumover->sqrt;
     $dqs = $dists->qsorti;
-#    print "dqs is $dqs\n";
+
     $ct1 = $ct1->(:,$dqs->(0:$dqs->dim(0)*0.8));
     $ct2 = $ct2->(:,$dqs->(0:$dqs->dim(0)*0.8));
-    
-    my $ii_targ = $ii+10;
+
+    if($opt->{DIST_NDELAYS}>1){
+	$dists = (($ct1a_02 - $ct2a_02)*($ct1a_02-$ct2a_02))->sumover->sqrt;
+	$dqs = $dists->qsorti;
+
+	$ct1_02 = $ct1_02->(:,$dqs->(0:$dqs->dim(0)*0.8));
+	$ct2_02 = $ct2_02->(:,$dqs->(0:$dqs->dim(0)*0.8));
+    }
+
+    my $ii_targ = $ii+2*$opt->{DIST_FIT_ITER};
     my $ii0 = $ii;
     for(;$ii0<$ii_targ;$ii0++) {
 	$nlx = amoeba($heur, $nlx, $siz/sqrt($ii+1), 1e-7, 1e-9, 1e4);
@@ -297,7 +495,8 @@ sub get_distortion_params2 {
     }
     
     print "done!\n";
-    
+
+    p "nlx=$nlx\n";
     my ($delta1, $delta2, $deltamu, $roll_angle, $r2, $orbital_rotation, $q, $qq) = $nlx->list;
     $deltamu /= 10;
     $delta1 /= 100;

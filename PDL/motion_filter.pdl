@@ -98,6 +98,7 @@ sub motion_filter {
     $opt->{FILTER_CUBE} = "CEL"         unless exists($opt->{FILTER_CUBE});
     $opt->{FILTER_REMOVE_FIXED} = 0     unless exists($opt->{FILTER_REMOVE_FIXED});
     $opt->{FILTER_HYPERSMOOTHING} = 10  unless exists($opt->{FILTER_HYPERSMOOTHING});
+    $opt->{FILTER_HYPERSMOOTH_PCT} = 10 unless exists($opt->{FILTER_HYPERSMOOTH_PCT});
     $opt->{FILTER_ZAP_HF} = 0           unless exists($opt->{FILTER_ZAP_HF});
 
 
@@ -193,7 +194,8 @@ sub motion_filter {
 
     ##############################
     # rv goes from 0 to 1 over the spatial extent on each axis (up to 1.4 at the corners)
-    my $cutoff = $opt->{FILTER_CUTOFF_PPF};
+    # cutoff is in frames per pixel, not pixels per frame -- hence the reciprocation.
+    my $cutoff = 1.0 / $opt->{FILTER_CUTOFF_PPF};
     my $nd = ndcoords($c3r->(:,:,(0)));
     my $dims = pdl($c3r->dim(0),$c3r->dim(1));
     $nd -= pdl($dims) * ($nd > $dims/2);
@@ -268,7 +270,10 @@ sub motion_filter {
 	ifft3($c4->inplace);
 	
 	print "Finding minima...";
-	my $c4min = $c4r->range($of,pdl($hash->{$fc}->dims))->mv(2,0)->minimum;
+	my $fr = $opt->{FILTER_HYPERSMOOTH_PCT}/100*($hash->{$fc}->dim(2)-$opt->{FILTER_APOD_FRAMES}*4) + $opt->{FILTER_APOD_FRAMES}*2;
+	print "hypersmooth_pct is $opt->{FILTER_HYPERSMOOTH_PCT}; frame is $fr\n";
+	my $c4qs = $c4r->range($of,pdl($hash->{$fc}->dims))->mv(2,0)->($opt->{FILTER_APOD_FRAMES}*2:-$opt->{FILTER_APOD_FRAMES}*2)->qsort;
+	my $c4min = $c4qs->(($fr));
 	print "subtracting...\n";
 	$hash->{$fc} -= $c4min;
     }

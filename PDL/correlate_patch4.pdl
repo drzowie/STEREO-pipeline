@@ -32,8 +32,8 @@ use PDL::NiceSlice;
 use strict;
 
 sub correlate_patch4 {
-    my $im0  = shift;   # full image
-    my $im1  = shift;   # full image 
+    our $im0  = shift;   # full image
+    our $im1  = shift;   # full image 
     my $loc0 = shift;   # 2-PDL: location in im0 (pixels)
     my $of0  = shift;   # 2-PDL: guess offset in piels to location in im1
     my $sizer0 = shift;  # radius of offset ranges to consider (in pixels)
@@ -49,25 +49,20 @@ sub correlate_patch4 {
     ##############################
     # Extract patches: one big, one normal
     $patch0 = $im0->range($loc0 - $patchr0 - $sizer0,        [$bigsize  , $bigsize  ], 't')->copy;
-    $patch1 = $im1->range($loc0 - $patchr0 + $of0, [$smallsize, $smallsize], 't')->copy;
+    $patch1 = $im1->range($loc0 - $patchr0 + $of0,           [$smallsize, $smallsize], 't')->copy;
 
 
      return asin(pdl(1.1,1.1)) if(any(!isfinite($patch0)) || any(!isfinite($patch1)));
 
-#    $patch0->where(!isfinite($patch0)) .= 0;
-#    $patch1->where(!isfinite($patch1)) .= 0;
-#    
-#    $patch0->badflag(0);
-#    $patch1->badflag(0);
-
     ##############################
     # Do the correlation in a PP routine below (hotspot)
-    $corr = zeroes($sizer0*2 + 1, $sizer0*2 + 1);
+    $corr = zeroes($bigsize-$smallsize, $bigsize-$smallsize);
     explicit_correlate4($patch0, $patch1, $corr);
     
     ##############################
     # Figure the major offset (pixel-to-pixel)
-    $maxloc = whichND($corr == ($corrmax = $corr->max));
+    $corrmax = $corr->max;
+    $maxloc = whichND($corr == $corrmax);
 
     if($maxloc->nelem == 0) {
       return asin(pdl(1.1,1.1));
@@ -77,15 +72,20 @@ sub correlate_patch4 {
     }
 
     $maxloc = $maxloc->(:,(0));
+#    p "maxloc=$maxloc\n";
 
     ##############################
     # Figure the sub-pixel offset with the convergent interpolator.
-    $patch0 = $im0->range($loc0 - $patchr0 - 3,                            [$smallsize+6,$smallsize+6],'t')->copy;
-    $patch1 = $im1->range($loc0 - $patchr0 - 3 + $of0 - ($maxloc-$sizer0), [$smallsize+6,$smallsize+6],'t')->copy;
-    $workspace = zeroes($patch0->dims,2);
+
+#    print "maxloc=$maxloc\n";
+    our($patch0a,$patch1a);
+    $patch0a = $im0->range($loc0 - $patchr0,                             [$smallsize+6,$smallsize+6],'t')->copy;
+    $patch1a = $im1->range($loc0 - $patchr0 + $of0 - $maxloc + $sizer0,  [$smallsize+6,$smallsize+6],'t')->copy;
+
+    $workspace = zeroes($patch0a->dims,2);
     $vec = zeroes(4);
-    fractional_correlate4($patch0->(0:-1:1,  0:-1:1),   $patch1->(0:-1:1,  0:-1:1),   $workspace, $vec ); 
-    
+    fractional_correlate4($patch0a->(0:-1:1,  0:-1:1),   $patch1a->(0:-1:1,  0:-1:1),   $workspace, $vec ); 
+#    print "return: vec is $vec\n";
     ##############################
     # Check correlation total 
     if($vec->((3)) < $corr_thresh) {
@@ -111,6 +111,7 @@ pp_def('explicit_correlate4',
        $GENERIC() sourcemean,sourcevar;
        $GENERIC() acc;
 
+       // accumulate the mean of the smaller patch
        patchmean = 0;
        for(ii=0;ii<$SIZE(d);ii++) {
 	 for(jj=0;jj<$SIZE(c);jj++) {
@@ -119,6 +120,7 @@ pp_def('explicit_correlate4',
        }
        patchmean /= $SIZE(d) * $SIZE(c);
 
+       // accumulate the variance of the smaller patch
        patchvar = 0;
        for(ii=0;ii<$SIZE(d);ii++) {
 	 for(jj=0;jj<$SIZE(c);jj++) {
@@ -128,7 +130,7 @@ pp_def('explicit_correlate4',
        patchvar /= $SIZE(d) * $SIZE(c);
        patchvar = sqrt(patchvar);
        
-       
+       // loop over all possible offets to get correlation at that offset
        for(ii=0;ii<$SIZE(f);ii++) {
 	 for(jj=0;jj<$SIZE(e);jj++) {
 	   acc  =0;
@@ -238,17 +240,20 @@ pp_def('fractional_correlate4',
        crot= 0;
 
 //printf( "\n\n");
-       for(mult=0.25; mult>=0.01; mult *= 0.66) {
+       for(mult=0.25; mult>=0.001; mult *= 0.75) {
 //printf("/");
  start_loop_$GENERIC(): 
 //printf("-");fflush(stdout);
-// printf( "%g,%g,%g 1/%g:  corr=%.8g\n",cdx,cdy,crot,1/mult, $out(n=>3));
+//printf( "%g,%g,%g 1/%g:  corr=%.8g\n",cdx,cdy,crot,1/mult, $out(n=>3));
 
-       if( fabs(cdx) < 2.5/2 && fabs(cdy) < 2.5/2 && fabs(crot) < 0.1/2 ) {
+       if( ! (fabs(cdx) < 2 && fabs(cdy) < 2 && fabs(crot) < 0.5)  ) {
+//         printf("cdx=%g; cdy = %g; crot=%g -- out of bounds.  Aborting\n",cdx,cdy,crot);
+	 $out(n=>0) = $out(n=>1) = $out(n=>2) = $out(n=>3) = 0;
+       } else {
          flag = 0;
 
-	 for( ddx = -mult;       ddx <=  mult ;          ddx += mult ) {
-	   for( ddy= -mult;        ddy <= mult ;          ddy += mult ) {
+	 for( ddx = -mult;       ddx <  mult*1.01 ;          ddx += mult ) {
+	   for( ddy= -mult;        ddy < mult*1.01 ;          ddy += mult ) {
 	     for( drot = -rotstep * mult;  drot <= rotstep * mult;    drot+= rotstep * mult ) {
 	       dx = cdx + ddx;
 	       dy = cdy + ddy;
@@ -371,7 +376,8 @@ pp_def('fractional_correlate4',
 		 $out(n=>1) = dy * 2;
 		 $out(n=>2) = rot * 2;
 		 $out(n=>3) = corr;
-//		 		 printf("dx=%g, dy=%g, rot=%g, corr=%g, c=%g, s=%g\n",dx*2,dy*2,rot*2,corr,cos(rot),sin(rot));
+// 		 printf("HIT:  dx=%g, dy=%g, rot=%g, corr=%g, c=%g, s=%g\n",dx*2,dy*2,rot*2,corr,cos(rot),sin(rot));
+//  		 printf("Check setting: (%g,%g,%g,%g)\n",$out(n=>0),$out(n=>1),$out(n=>2),$out(n=>3));
 		 cdx = dx;
 		 cdy = dy; 
 		 crot = rot;
@@ -380,10 +386,10 @@ pp_def('fractional_correlate4',
 	     }
 	   }
 	 }
-       } else {
-	 $out(n=>0) = $out(n=>1) = $out(n=>2) = $out(n=>3) = 0;
        }
+//       printf("at mult 1/%g, best offset is (%g,%g,%g);  correlation is %g",1/mult,$out(n=>0),$out(n=>1),$out(n=>2),$out(n=>3));
        }
+       
 //       printf("FINAL: dx=%g, dy=%g, rot=%g, corr=%g\n",dx*2,dy*2,rot*2,corr);
 EOC
        );
