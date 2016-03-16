@@ -1,0 +1,41 @@
+use PDL::FFTW3;
+use PDL::NiceSlice;
+
+sub fft_correlate {
+  my $a = shift;
+  my $b = shift;
+  my $opt = shift // {};
+  my $rcut = $opt->{rcut} // 5;
+
+  my $ac = $a->(*2)->sever;
+  my $bc = $b->(*2,-1:0:-1,-1:0:-1)->sever;
+
+  $ac->((1)) .= 0;
+  $bc->((1)) .= 0;
+
+  $a = $ac->((0)); $a->where(!isfinite($a)) .= 0;
+  $b = $bc->((0)); $b->where(!isfinite($b)) .= 0;
+  
+  my $afc = fft2($ac);
+  my $bfc = fft2($bc);
+
+  # Find the complex product
+  my $cfc = PDL->new_from_specification($afc->dims);
+  $cfc->((0)) .= $afc->((0)) * $bfc->((0))  -  $afc->((1)) * $bfc->((1));
+  $cfc->((1)) .= $afc->((0)) * $bfc->((1))  +  $afc->((1)) * $bfc->((0));
+
+  $cfc->((0),(0),(0)) .= 0;  # subtract mean
+
+  my $cc = ifft2($cfc) / $a->nelem / $b->nelem;
+  my $c = $cc->((0),-1:0:-1,-1:0:-1);
+
+  # Find peak correlation coefficient and cut it out
+  my $coords = whichND($c==$c->max)->(:,(0));
+  my $cutout = $c->range($coords->(:,(0))-$rcut,[$rcut*2+1,$rcut*2+1],'p');
+
+  # Calculate moment
+  my $ndc = ndcoords($cutout) - $rcut;
+  our $moment1 = ($cutout * $ndc->mv(0,-1))->sumover->sumover / $cutout->sumover->sumover;
+
+  return $coords + $moment1;
+}
