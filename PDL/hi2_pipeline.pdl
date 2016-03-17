@@ -13,7 +13,7 @@
 
 sub hi2_pipeline {
     my $in_list = shift;
-    my $opt = shift;
+    our $opt = shift;
 
     my $opt_defaults = {
 	OUTPUT_DIR    => 'processed',
@@ -22,6 +22,8 @@ sub hi2_pipeline {
 
 	FILE_STATUS_DB => 0,
 	REJECT_BY_PATCH => 0,
+
+	DIST_GUESS_DRIFTRATE => 1024/70,  # stellar driftrate, in pixels per day (1 deg per day)
 
 	F_POLYNOMIAL => 0,
 	F_MINI => 0,
@@ -55,14 +57,13 @@ sub hi2_pipeline {
 	DIST_MIN_PCORR => 0.9,
 	DIST_FIT_ITER=>30,
 	DIST_CORRTIME => 5,
-	DIST_CORR_RSIZE => 10,
 	DIST_CORR_NSAMP => 40,
-	DIST_CORR_RSIZE=>15,
-	DIST_CORR_PSIZE=>25,
+	DIST_CORR_RSIZE=>20,
+	DIST_CORR_PSIZE=>35,
 	DIST_NDELAYS=>1,
 	INTERP_BLUR=>2.5,
 
-		
+	STAR_FLICKER_THRESH=>2.25,
 
 	PIXEL_YRANGE => pdl(15,1009),
 
@@ -104,6 +105,8 @@ sub hi2_pipeline {
     print "shift_to_celestial...\n";
     shift_to_celestial($hash, $opt);
 
+    print "Fixing up bad values in celestial plane...\n";
+    fixup_cel_mask($hash,$opt);
 
 #    delete $hash->{RAW_CUBE};
 #    delete $hash->{BKSUB_CUBE};
@@ -116,12 +119,38 @@ sub hi2_pipeline {
     }
     print "null_stars...\n";
     null_stars($hash, $opt);
-    
+
     if($opt->{DEBUG_PIPELINE}) {
         print "Dumping nulled cube to $opt->{DEBUG_OUTPUT_PREFIX}cel1.fits\n";
         wfits($hash->{CEL_CUBE},$opt->{DEBUG_OUTPUT_PREFIX}."cel1.fits");
     }
+
+
+    print "Removing common-mode fluctuations...\n";
+    {
+    my $med = $hash->{CEL_CUBE}->(200:-200,200:-200)->clump(2)->medover;
+    my $fluc_med = $med - ($med->(:,*1)->med2d(ones(11,1)))->(:,(0));
+    $baddies = whichND($hash->{CEL_CUBE})==0;
+    $hash->{CEL_CUBE} -= $fluc_med->(*1,*1,:);
+    $hash->{CEL_CUBE}->indexND($baddies) .= 0;
+    }
+
+    print "Removing horrible places (bright stars etc)....\n";
+    {
+        my $fluc = (($hash->{CEL_CUBE}->(:,:,1:-1) - $hash->{CEL_CUBE}->(:,:,0:-2))**2)->mv(2,0)->average->sqrt;
+	my $fluc_mask = ($fluc > $fluc->median * $opt->{STAR_FLICKER_THRESH});
+	$fluc_coords = $fluc_mask->whichND;
+	$hash->{CEL_CUBE}->indexND($fluc_coords) .= $hash->{CEL_CUBE}->badvalue;
+	$hash->{CEL_CUBE}->badflag(1);
+	clean_baddies($hash->{CEL_CUBE});
+    }
 	
+
+    if($opt->{DEBUG_PIPELINE}) {
+	print "Dumping nulled/canceled cube to $opt->{DEBUG_OUTPUT_PREFIX}cel1a.fits\n";
+	wfits($hash->{CEL_CUBE},$opt->{DEBUG_OUTPUT_PREFIX}."cel1a.fits");
+    }
+
     remove_polynomials($hash,$opt);
 
     if($opt->{DEBUG_PIPELINE}) {
