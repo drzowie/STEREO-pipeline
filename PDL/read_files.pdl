@@ -133,7 +133,8 @@ sub read_files {
 	FILE_STATUS_DB => "./files.db",
 	CLEAN_BAD => 1,
 	BAD_DIL_PIX => 1,
-	BAD_DIL_FR => 0
+	BAD_DIL_FR => 0,
+	REGULARIZE_EXPOSURE => 0
     };
 
     for my $k(keys %$defaults){
@@ -453,13 +454,16 @@ sub read_files {
 	     if($opt->{MASK_THRESH}) {
 		 $m = ($out->{RAW_CUBE}->(:,:,($i))->med2d(ones(3,3)) <= $opt->{MASK_THRESH})->convolveND(ones(3,3)/9);
 	     }
-	     $out->{MASK_CUBE}->(:,:,($i)) .= $m > 0.999 ;
+	     $out->{MASK_CUBE}->(:,:,($i)) .= $m > 0.5 ;
 	     print "$i ";
 	 }
 
 	 ## Mask out the out-of-limits valus inside the image, and interpolate inward.
 	 $out->{RAW_CUBE} = $out->{RAW_CUBE}->setbadif(!$out->{MASK_CUBE});
-	 clean_baddies($out->{RAW_CUBE},0,100,50);
+
+	 if($opt->{CLEAN_BAD}) {
+	     clean_baddies($out->{RAW_CUBE},0,100,50);
+	 }
 
 	 # Now mask out more points...
 	 if($opt->{MASK_RADIUS}) {
@@ -522,6 +526,16 @@ sub read_files {
 	     $out->{RAW_HDRS}->[$i] = $b->gethdr;
 	 }
 	 print "okay\n";
+     }
+
+    if($opt->{REGULARIZE_EXPOSURE}) {
+	print "Regularizing exposures...";
+	my $exp = pdl( map { $_->{EXPTIME} } @{$out->{RAW_HDRS}} )->average;
+	print "(exp=$exp)\n";
+	for my $i(0..$out->{RAW_CUBE}->dim(2)-1){
+	    $out->{RAW_CUBE}->(:,:,($i)) *= $exp / $out->{RAW_HDRS}->[$i]->{EXPTIME};
+	    print ".";
+	}
      }
 
 

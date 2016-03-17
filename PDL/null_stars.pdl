@@ -90,20 +90,27 @@ dilated 5x5 and filled in with neighboring values.
 2.1 - Switched bad-value dilation from pre-expansion to multiple ops.
 
 =cut
+BEGIN {
+    eval { correlate_patch4();};
+}
 
 sub null_stars {
     my $hash = shift;
     my $opt = shift;
-    $VERSION = "2.1 13-Jun-2013";
+    my $VERSION = "2.1 13-Jun-2013";
 
     $opt = {} unless defined($opt);
 
     my $defaults = {
 	NULL_SMOOTH_FRAMES   => 1,         # Number of frames to smooth over for median filtering (1 = no smoothing)
 	NULL_SMOOTH_SIZE     => [11,5],    # Number of pixels (X,Y) to smooth over for median filtering
-	NULL_MIN_PCT         => 10,        # Percentile value to keep as the "zero" for each pixel
+	NULL_MIN_PCT         => 50,        # Percentile value to keep as the "zero" for each pixel (defaults to median)
 	NULL_BADVAL_THRESH   => 3,         # Bad-pixel threshold, in units of image average value (applied after unsharp masking)
 	MAX_PCT_BAD          => 25,        # Maximum percentage of pixels cut out for being too bright
+	NULL_MARK_RES_BAD    => 0,  # Try to get rid of residual stars.
+	NULL_BAD_DIL_R       => 2,  # Dilate this many pixels in X and Y
+	NULL_BAD_DIL_T       => 0,  # Dilate this many pixels in T
+	NULL_BAD_FILL_PCT    => 20, # Pixel locations with more than this percentage of bad values in time are all bad.
     };
     
     for my $k(keys %$defaults) {
@@ -125,7 +132,7 @@ sub null_stars {
     $hash->{CEL_MASK} *= $hash->{CEL_CUBE}->isfinite;
 
     my $maskval = ($hash->{CEL_MASK}>0)->mv(2,0)->sumover;
-    my $maskratio = $maskval / $hash->{CEL_MASK}->dim(2);
+    my $maskratio = float($maskval) / $hash->{CEL_MASK}->dim(2);
     $hash->{CEL_MASK} *= ($maskratio > 0.25);
 
     $hash->{CEL_CUBE}->where(!$hash->{CEL_MASK}) .= 0;
@@ -133,48 +140,52 @@ sub null_stars {
     ##############################
     # Next find the places that are *not* properly nulled, and mark 'em bad.
     # bkg is a normalization deal...
-    
-    my $cc1 = $hash->{CEL_CUBE}->copy;
 
-    print "null_stars: finding residual star locations...\n";
-
-    my $bkg = $hash->{CEL_CUBE}->avg;
-
-    my $k = ((rvals(5,5)==0) - ones(5,5)/25);
-    my $usm = $hash->{CEL_CUBE}->copy;
-    my $i;
-    for $i(0..$usm->dim(2)-1){
-    	$usm->(:,:,($i)) .= $hash->{CEL_CUBE}->(:,:,($i))->convolveND($k,bound=>'e')->abs;
-    }
-    $usm /= $bkg;
-
-    my $h2 = $usm->copy;
-    
-    for my $i(0..$h2->dim(2)-1){ 
-	$h2->(:,:,($i)) .= $usm->mv(2,0)->range(pdl($i-3),[7],'e')->medover;
-	print "$i ";
-    }
-
-    print "Dilating...\n";
-
-    $hash->{CEL_CUBE}->badflag(1);
-    print "whichND...\n";
-    my $locus = whichND($h2 >= $opt->{NULL_BADVAL_THRESH} ); 
-    print "locus is ".join("x",$locus->dims)."\n";
-
-    print "setting bad values";
-    for my $dx(-2..2) {
-	for my $dy(-2..2){
-	    print ".";
-	    $hash->{CEL_CUBE}->range($locus+pdl($dx,$dy,0),[0],'e') .= $hash->{CEL_CUBE}->badvalue;
+    if($opt->{NULL_MARK_RES_BAD}) {
+	print "null_stars: finding residual star locations...\n";
+	my $bkg = $hash->{CEL_CUBE}->avg;
+	
+	my $k = ((rvals(5,5)==0) - ones(5,5)/25);
+	my $usm = $hash->{CEL_CUBE}->copy;
+	my $i;
+	for $i(0..$usm->dim(2)-1){
+	    $usm->(:,:,($i)) .= $hash->{CEL_CUBE}->(:,:,($i))->convolveND($k,bound=>'e')->abs;
 	}
+	$usm /= $bkg;
+	
+	my $h2 = $usm->copy;
+	
+	for my $i(0..$h2->dim(2)-1){ 
+	    $h2->(:,:,($i)) .= $usm->mv(2,0)->range(pdl($i-3),[7],'e')->medover;
+	    print "$i ";
+	}
+	
+	print "Dilating...\n";
+	
+	$hash->{CEL_CUBE}->badflag(1);
+	print "whichND...\n";
+	my $locus = whichND($h2 >= $opt->{NULL_BADVAL_THRESH} ); 
+	print "locus is ".join("x",$locus->dims)."\n";
+	
+	print "setting bad values";
+	for my $dx(-$opt->{NULL_BAD_DIL_R}..$opt->{NULL_BAD_DIL_R}) {
+	    for my $dy(-$opt->{NULL_BAD_DIL_R}..$opt->{NULL_BAD_DIL_R}){
+		for my $dz(-$opt->{NULL_BAD_DIL_T}..$opt->{NULL_BAD_DIL_T}) {
+		    print ".";
+		    $hash->{CEL_CUBE}->range($locus+pdl($dx,$dy,$dz),[0],'e') .= $hash->{CEL_CUBE}->badvalue;
+		}
+	    }
+	}
+	print "\n";
+	
+	my $badsum = $hash->{CEL_CUBE}->mv(-1,0)->isbad->sum;
+	my $badsum_locus = whichND($badsum >= $hash->{CEL_CUBE}->dim(2)*$opt->{NULL_BAD_FILL_PCT}/100);
+	$hash->{CEL_CUBE}->indexND($badsum_locus) .= $hash->{CEL_CUBE}->badvalue;
+	
+	print "calling clean_baddies...\n";
+	clean_baddies( $hash->{CEL_CUBE}, 0, undef, $opt->{MAX_PCT_BAD} );
     }
-    print "\n";
-
-    print "calling clean_baddies...\n";
-    clean_baddies( $hash->{CEL_CUBE}, 0, undef, $opt->{MAX_PCT_BAD} );
-
-
+    my $i;
     ##############################
     # Now median-smooth the remainder.
     print "null_stars: median-smoothing...\n";
