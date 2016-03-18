@@ -43,8 +43,9 @@ sub hi2_pipeline {
 	NULL_MIN_PCT=>50,
 	NULL_BADVAL_THRESH=>3,
 
-	MASK_RADIUS=>520,
-	MASK_HI2_STRIP=> $opt->{HI2_SC},
+	MASK_RADIUS=>($opt->{HI2_SC} // 520),
+	MASK_HI2_STRIP=>$opt->{HI2_SC},
+
 	PIXEL_XRANGE=>pdl(0,1023),
 	PIXEL_YRANGE=>pdl(0,1023),
 	MARK_BAD=>1,

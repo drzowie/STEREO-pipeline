@@ -90,7 +90,7 @@ Points with values higher than MASK_THRESH are marked BAD if the MARK_BAD flag i
 =item MASK_RADIUS - circular masking
 
 This is useful for HI-2 data.  Points outside the specified radius are marked bad. Set
-this to 0 to disable it.
+this to 0 to disable it.  If you feed in an array ref instead, then it should take the form of [$radius,$xcen,$ycen].  You can also feed in a spacecraft ("a" or "b") and get an automatically offset mask.
 
 =item MASK_HI2_STRIP - mask out the occulter in the HI-2 fields of view
 
@@ -450,11 +450,16 @@ sub read_files {
 	 print "marking bad points...\n";
 
 	 for $i(0..$out->{RAW_CUBE}->dim(2)-1) {
-	     my $m = 1;
+	     my $m;
 	     if($opt->{MASK_THRESH}) {
-		 $m = ($out->{RAW_CUBE}->(:,:,($i))->med2d(ones(3,3)) <= $opt->{MASK_THRESH})->convolveND(ones(3,3)/9);
+	         # Make a mask of outlying pixels:  m is 1 for bad pixels.
+		 $m = double($out->{RAW_CUBE}->(:,:,($i)))->abs >= $opt->{MASK_THRESH};
+
+		 # Dilate the mask
+		 $m->inplace->convolveND(ones(3,3)/9);
 	     }
-	     $out->{MASK_CUBE}->(:,:,($i)) .= $m > 0.5 ;
+	     # MASK_CUBE is 0 for bad pixels, 1 for good pixels.
+	     $out->{MASK_CUBE}->(:,:,($i)) &= ( $m == 0 );
 	     print "$i ";
 	 }
 
@@ -467,8 +472,18 @@ sub read_files {
 
 	 # Now mask out more points...
 	 if($opt->{MASK_RADIUS}) {
-	     print "mask_radius is $opt->{MASK_RADIUS}\n";
-	     my $rvm =  ( rvals($out->{RAW_CUBE}->(:,:,(0))) < $opt->{MASK_RADIUS} )->byte;
+	     my $rvm;
+	     if(ref($opt->{MASK_RADIUS}) =~ m/ARRAY/) {
+		 my $mro = $opt->{MASK_RADIUS};
+		 print "using offset mask: r=$mro->[0], centered at ($mro->[1],$mro->[2])\n";
+		 $rvm = (rvals($out->{RAW_CUBE}->(:,:,(0)),{center=>[$mro->[1],$mro->[2]]}) < $mro->[0])->byte;
+	     } elsif($opt->{MASK_RADIUS} =~ m/a/i) {
+		 print "using hi2 preset mask\n";
+		 $rvm = (rvals($out->{RAW_CUBE}->(:,:,(0)),{center=>[506,512]}) < 508)->byte;
+	     } else {
+		 print "mask_radius is $opt->{MASK_RADIUS}\n";
+		 my $rvm =  ( rvals($out->{RAW_CUBE}->(:,:,(0))) < $opt->{MASK_RADIUS} )->byte;
+	     }
 	     $out->{MASK_CUBE} &= $rvm;
 	     $out->{RAW_CUBE}->indexND(0+whichND($rvm==0)) .= 0;
 	 }
