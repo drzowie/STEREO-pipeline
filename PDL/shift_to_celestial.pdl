@@ -62,7 +62,7 @@ sub shift_to_celestial {
 
     $opt = {} unless(defined $opt);
     $opt->{'ALIGN_DEJITTER'} = 1    unless(defined $opt->{'ALIGN_DEJITTER'});
-    $opt->{'ALIGN_PATCHSIZE'} = 50  unless(defined $opt->{'ALIGN_PATCHSIZE'});
+    $opt->{'ALIGN_PATCHSIZE'} = 75  unless(defined $opt->{'ALIGN_PATCHSIZE'});
     $opt->{'INTERP_METHOD'} = 'j'   unless(defined $opt->{'INTERP_METHOD'}); # use default for science
     $opt->{'INTERP_BLUR'} = 2       unless(defined $opt->{'INTERP_BLUR'}); # use default
     $opt->{'ALIGN_PATCH_MASK'} = 1  unless(defined $opt->{'ALIGN_PATCH_MASK'});
