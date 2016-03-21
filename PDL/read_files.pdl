@@ -493,7 +493,7 @@ sub read_files {
 	     print "mask_hi2_strip - masking '$opt->{MASK_HI2_STRIP}'\n";
 	     my $stripmask = zeroes(byte,$out->{RAW_CUBE}->(:,:,(0))->dims);
 	     if($opt->{MASK_HI2_STRIP} =~ m/a/i) {
-		 $stripmask .= (xvals($out->{RAW_CUBE}->(:,:,(0))) >= 230) | ((yvals($out->{RAW_CUBE}->(:,:,(0)))-504)->abs >= 70);
+		 $stripmask .= (xvals($out->{RAW_CUBE}->(:,:,(0))) >= 240) | ((yvals($out->{RAW_CUBE}->(:,:,(0)))-504)->abs >= 75);
 	     }
 	     elsif($opt->{MASK_HI2_STRIP} =~ m/b/i) {
 		 print STDERR "WARNING: read_files: STEREO-B HI2 stripmask magic numbers may not be correct\n";

@@ -87,6 +87,13 @@ sub hi2_pipeline {
     remove_f_corona($hash, $opt);
 
 
+    print "dilating badmask";
+    for $i(0..$hash->{MASK_CUBE}->dim(2)-1){
+    	print ".";
+	$hash->{MASK_CUBE}->(:,:,($i)) .= ($hash->{MASK_CUBE}->(:,:,($i))->convolveND(ones(5,5))==25);
+    }
+    print "\n";
+    
     print "opt is: ";
     for $k(sort keys %$opt) {
 	print "\t$k\t$opt->{$k}\n";
@@ -102,22 +109,29 @@ sub hi2_pipeline {
     print "distortion parameters...\n";
     $hash = get_distortion_params2($hash, $opt);
 
-
     print "shift_to_celestial...\n";
     shift_to_celestial($hash, $opt);
+    for $i(0..$hash->{CEL_MASK}->dim(2)-1){
+	$hash->{CEL_MASK}->(:,:,($i)) .= ($hash->{CEL_MASK}->(:,:,($i))->convolveND(ones(5,5))==25);
+	print ".";
+    }
 
-    print "Fixing up bad values in celestial plane...\n";
-    fixup_cel_mask($hash,$opt);
-
-#    delete $hash->{RAW_CUBE};
-#    delete $hash->{BKSUB_CUBE};
-#    delete $hash->{MASK_CUBE};
+    $hash->{CEL_CUBE}->where($hash->{CEL_MASK}==0).=0;
+    
     if($opt->{DEBUG_PIPELINE}) {
 	print "Dumping celestial cube to $opt->{DEBUG_OUTPUT_PREFIX}cel.fits\n";
 	wfits( $hash->{CEL_CUBE}, $opt->{DEBUG_OUTPUT_PREFIX}."cel.fits" );
 	print "Dumping cel mask to $opt->{DEBUG_OUTPUT_PREFIX}cmask.fits\n";
 	wfits( $hash->{CEL_MASK}, $opt->{DEBUG_OUTPUT_PREFIX}."cmask.fits" );
     }
+
+    print "Fixing up bad values in celestial plane";
+    fixup_cel_mask($hash,$opt);
+    print "\n";
+
+#    delete $hash->{RAW_CUBE};
+#    delete $hash->{BKSUB_CUBE};
+#    delete $hash->{MASK_CUBE};
     print "null_stars...\n";
     null_stars($hash, $opt);
 
@@ -201,7 +215,7 @@ sub hi2_pipeline {
     # Dump output to files...
     `mkdir $opt->{OUTPUT_DIR}`;
     if($opt->{OUTPUT_FILES}) {
-	for $i(2..$hash->{CLEAN_CUBE}->dim(2)-3) {
+	for $i(4..$hash->{CLEAN_CUBE}->dim(2)-5) {
 	    my $im = $hash->{CLEAN_CUBE}->(:,:,($i))->copy;
 	    $im->sethdr($hash->{RAW_HDRS}->[$i]);
 	    my $fname = sprintf ("%s/clean-%s--BATCH-%s.fits", $opt->{OUTPUT_DIR}, $im->hdr->{'DATE-OBS'}, $hash->{RAW_HDRS}->[0]->{'DATE-OBS'});

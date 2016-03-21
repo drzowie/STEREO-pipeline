@@ -105,17 +105,26 @@ sub shift_to_celestial {
 
     my @align_patchsize = $align_patchsize->list;
 
+    ### t_patchcrop is a Transformation to move the center of the image to
+    ### the center of a small alignment patch.  It is meant to work on pixel
+    ### coordinates, not scientific coordinates.
     my $t_patchcrop = t_linear(pre=>[ - $x_center + $align_patchsize[0]/2,
 				      - $y_center + $align_patchsize[1]/2
 				      ]
 	);
     
     my $blur=$opt->{INTERP_BLUR};
-    my $master_patch = ($hash->{'BKSUB_CUBE'}->(:,:,($dex0)) * $hash->{'MASK_CUBE'}->(:,:,($dex0))) -> map(
+    my $master_patch = $hash->{'BKSUB_CUBE'}->(:,:,($dex0)) -> map(
 	$t_patchcrop, 
 	\@align_patchsize,
 	{method=>$opt->{'INTERP_METHOD'},pix=>1,blur=>$blur}
 	);
+    my $mp_mask = ($hash->{'MASK_CUBE'}->(:,:,($dex0)))->map(
+	$t_patchcrop,
+	\@align_patchsize, 
+	{method=>$opt->{'INTERP_METHOD'},pix=>1,blur=>$blur}
+	);
+    $mp_mask .= ($mp_mask==1);
 
     
     for $i(0..$hash->{'BKSUB_CUBE'}->dim(2)-1) {
@@ -129,6 +138,10 @@ sub shift_to_celestial {
 	my $nudge;
 
 	if($opt->{ALIGN_DEJITTER}) {
+	    ### Zero out busted places! (try to solve "corelation is nan" problem)
+	    print "mz...";
+#	    $hash->{'MASK_CUBE'}->(:,:,($i))->where(!isfinite($hash->{'BKSUB_CUBE'}->(:,:,($i)))) .= 0;
+#	    $hash->{'BKSUB_CUBE'}->(:,:,($i))->where($hash->{'MASK_CUBE'}->(:,:,($i))==0) .= 0;
 
 	    my $heur = sub {
 		my $vec = shift;
@@ -139,13 +152,22 @@ sub shift_to_celestial {
 		# Offset by dx and rotate by $rot about the center of the patch
 		my $t_z = t_linear(pre=>$dx - $patch_cen, post=>$patch_cen, rot=>$rot);
 
-		our $newpatch = ($hash->{'BKSUB_CUBE'}->(:,:,($i)) * $hash->{'MASK_CUBE'}->(:,:,($i)))->map(
+		my $newpatch = $hash->{'BKSUB_CUBE'}->(:,:,($i))->map(
 		    $t_z x $t_patchcrop x !$t_nl x $t_o x $t_nl,
 		    \@align_patchsize,
 		    {method=>$opt->{'INTERP_METHOD'},pix=>1,blur=>$blur}
 		    );
-		my $p0 = $master_patch->clump(2);
-		my $p1 = $newpatch->clump(2);
+		my $np_mask =  $hash->{'MASK_CUBE'}->(:,:,($i))->float->map(
+		    $t_z x $t_patchcrop x !$t_nl x $t_o x $t_nl,
+		    \@align_patchsize,
+		    {method=>$opt->{'INTERP_METHOD'},pix=>1,blur=>$blur}
+		    );
+
+		$np_mask .= ($np_mask==1);
+		my $ok = ($np_mask & $mp_mask);
+		my $p0 = $master_patch->where($ok);
+		my $p1 = $newpatch->where($ok);
+
 		my $p0av = $p0->average;
 		my $p0p = $p0 - $p0av->(*1);
 		my $p0sd = ($p0p * $p0p)->average->sqrt;
@@ -183,17 +205,13 @@ sub shift_to_celestial {
 		{method=>$opt->{'INTERP_METHOD'}, pix=>1,blur=>$blur}
 	    );
 	    
-	    print "mask...";
-	    my $mask_dilate;
-	    $mask_dilate = int(($opt->{INTERP_BLUR}+1)*3);
-	    $mask_dilate += ($mask_dilate%2==0);
-	    print "md: $mask_dilate ";
+	print "mask...";
 	$hash->{'CEL_MASK'}->(:,:,($i)) .=
-	    ( $hash->{'MASK_CUBE'}->(:,:,($i))->map(
+	    ( $hash->{'MASK_CUBE'}->(:,:,($i))->double->map(
 		$t_crop x !$t_nl x $t_o x $t_nl,
 		[$xr->at(1)-$xr->at(0),$yr->at(1)-$yr->at(0)],
-		{method=>'s',pix=>1}
-	    ) != 0)->convolveND(ones($mask_dilate,$mask_dilate)) >= $mask_dilate*$mask_dilate;
+		{method=>$opt->{'INTERP_METHOD'},pix=>1,blur=>$blur}
+	      )>(1 - 1e-15)); # little bit of slop for roundoff...
 	    
 	print (($hash->{CEL_MASK}->(:,:,$i)->sum)." OK points\n");
 

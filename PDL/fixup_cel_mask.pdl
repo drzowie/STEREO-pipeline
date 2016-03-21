@@ -22,9 +22,11 @@ sub fixup_cel_mask {
     my $hash = shift;
     my $opt = shift // {};
 
-    $opt->{MASK_PATCH_MIN_PCT} = 50 unless(defined($opt->{MASK_PATCH_MIN_PCT}));  # A point must be good in 50% of images to be patched
-    $opt->{MASK_PATCH_MAX_RUN} = 25 unless(defined($opt->{MASK_PATCH_MAX_RUN}));  # No run of bad points can be longer than 25 frames
+    $opt->{MASK_PATCH_MIN_PCT} =  0 unless(defined($opt->{MASK_PATCH_MIN_PCT}));  # A point must be good in <n>% of images to be patched
+    $opt->{MASK_PATCH_MAX_RUN} = 75 unless(defined($opt->{MASK_PATCH_MAX_RUN}));  # No run of bad points can be longer than <n> frames
     $opt->{MASK_PATCH_ZERO}    =  0 unless(defined($opt->{MASK_PATCH_ZERO}));     # zero out bad values at the end if true.
+
+    $hash->{CEL_CUBE}->where($hash->{CEL_MASK}==0).=0;
 
     our $thresh = $opt->{MASK_PATCH_MIN_PCT} * $hash->{CEL_MASK}->dim(2) / 100;
     print "thresh=$thresh\n";
@@ -34,7 +36,7 @@ sub fixup_cel_mask {
     $cm = (($hash->{CEL_MASK}==0)->convolveND(ones(byte,5,5),{method=>'direct'})==0);
 
     # patchup_mask -- set of pixels for which we shouldn't even bother.
-    our $patchup_mask = (  ($cm->mv(-1,0) == 0)->sumover <= $thresh );
+    our $patchup_mask = (  ($cm->mv(-1,0) != 0)->sumover >= $thresh );
 
     # Create output variables for the helper.
     my $a = null;
