@@ -106,12 +106,16 @@ sub hi2_pipeline {
     print "shift_to_celestial...\n";
     shift_to_celestial($hash, $opt);
 
+
     print "Fixing up bad values in celestial plane...\n";
     fixup_cel_mask($hash,$opt);
 
-#    delete $hash->{RAW_CUBE};
-#    delete $hash->{BKSUB_CUBE};
-#    delete $hash->{MASK_CUBE};
+    unless($opt->{DEBUG_PIPELINE}) {
+	delete $hash->{RAW_CUBE};
+	delete $hash->{BKSUB_CUBE};
+	delete $hash->{MASK_CUBE};
+    }
+
     if($opt->{DEBUG_PIPELINE}) {
 	print "Dumping celestial cube to $opt->{DEBUG_OUTPUT_PREFIX}cel.fits\n";
 	wfits( $hash->{CEL_CUBE}, $opt->{DEBUG_OUTPUT_PREFIX}."cel.fits" );
