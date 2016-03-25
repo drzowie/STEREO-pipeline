@@ -52,6 +52,12 @@ HI-1 pipeline processing.
 
 Pixels with an absolute value larger than this are treated as BAD values and ignored.
 
+=item USE_HDR_FNAME (default=1)
+
+If the field FILENAME is present in the headers of processed files, use it.
+This is a switch in case of difficulty with the header processing of the various
+pipelines: you can turn it off if need be.
+
 =back
 
 =cut
@@ -126,8 +132,9 @@ sub merge_batches {
 
 	    my $fh = rfits($filenames{$f}->[0],{DATA=>0});
 	    my $out_fname;
-	    if($fh->{FILENAME}) {
+	    if($opt->{USE_HDR_FNAME} && $fh->{FILENAME}) {
 		$out_fname = $fh->{FILENAME};
+		print "f is $f; \$filenames{\$f}->[0] is $filenames{$f}->[0]; fh->{FILENAME} is $fh->{FILENAME}\n";
 		$out_fname =~ s/_[1b](....\.fts)$/_2$ptype$1/;  # update L1 to L2
 	    } else {
 		$out_fname = "merged-$f.fits";
